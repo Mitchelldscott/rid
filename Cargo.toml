@@ -1,0 +1,18 @@
+[package]
+name = "rid"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hidapi = { version = "2.2.0", optional = true }
+chrono = { version = "0.4.31", optional = true }
+yaml-rust = { version = "0.4.5", optional = true }
+more-asserts = { version = "0.3.1", optional = true }
+crossbeam-channel = { version = "0.5.8", optional = true }
+serde = { version = "1.0.190", features = ["derive"], optional = true }
+gnuplot = { version = "0.0.41", optional = true }
+
+[features]
+std = ["dep:hidapi", "dep:chrono", "dep:yaml-rust", "dep:more-asserts", "dep:crossbeam-channel", "dep:serde", "dep:gnuplot"]
