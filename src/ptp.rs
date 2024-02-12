@@ -31,6 +31,12 @@ pub const PTP_CWTS_INDEX: usize = 52;
 pub const PTP_HRTS_INDEX: usize = 56;
 pub const PTP_HWTS_INDEX: usize = 60;
 
+
+pub const SEC_PER_HOUR: u64 = 3_600;
+pub const USEC_PER_SEC: u32 = 1_000_000;
+pub const SEC_PER_USEC: f32 = 1.0 / 1_000_000.0;
+pub const USEC_PER_HOUR: u32 = USEC_PER_SEC * SEC_PER_HOUR as u32;
+
 #[derive(Debug)]
 pub struct TimeStamp {
     client_read: u32,
@@ -58,11 +64,11 @@ impl TimeStamp {
         )
     }
 
-    pub fn offset(&self) -> i32 {
-        ((self.host_write + self.host_read) as i32
-                    - self.client_write as i32
-                    - self.client_read as i32)
-                    / 2
+    pub fn offset(&self) -> f32 {
+        ((self.host_write + self.host_read) as f32
+                    - self.client_write as f32
+                    - self.client_read as f32)
+                    / 2.0
     }
 
     pub fn stamp(&mut self, buffer: &mut RIDReport) {
@@ -73,8 +79,8 @@ impl TimeStamp {
         buffer[PTP_HWTS_INDEX..PTP_HWTS_INDEX + 4].copy_from_slice(&self.host_write.to_be_bytes());
     }
 
-    pub fn host_read(&mut self, buffer: &RIDReport, millis: u32) {
-        self.host_read = millis;
+    pub fn host_read(&mut self, buffer: &RIDReport, timestamp: u32) {
+        self.host_read = timestamp;
 
         self.client_read = u32::from_be_bytes([
             buffer[PTP_CRTS_INDEX],
@@ -91,8 +97,8 @@ impl TimeStamp {
         ]);
     }
 
-    pub fn client_read(&mut self, buffer: &RIDReport, millis: u32) {
-        self.client_read = millis;
+    pub fn client_read(&mut self, buffer: &RIDReport, timestamp: u32) {
+        self.client_read = timestamp;
 
         self.host_read = u32::from_be_bytes([
             buffer[PTP_HRTS_INDEX],
@@ -109,16 +115,16 @@ impl TimeStamp {
         ]);
     }
 
-    pub fn host_stamp(&mut self, buffer: &mut RIDReport, millis: u32) {
+    pub fn host_stamp(&mut self, buffer: &mut RIDReport, timestamp: u32) {
 
-        self.host_write = millis;
+        self.host_write = timestamp;
         self.stamp(buffer);
     
     }
 
-    pub fn client_stamp(&mut self, buffer: &mut RIDReport, millis: u32) {
+    pub fn client_stamp(&mut self, buffer: &mut RIDReport, timestamp: u32) {
 
-        self.client_write = millis;
+        self.client_write = timestamp;
         self.stamp(buffer);
 
     }
@@ -126,7 +132,6 @@ impl TimeStamp {
 
 pub struct Duration {
     hours: u64,
-    seconds: u16,
     microseconds: u32, 
 }
 
@@ -134,70 +139,43 @@ impl Duration {
     pub fn default() -> Duration {
         Duration {
             hours: 0,
-            seconds: 0,
             microseconds: 0,
         }
     }
 
-    pub fn add_micros(&mut self, micros: i32) -> u32 {
-        
-        if micros.is_negative() {
+    pub fn add_micros(&mut self, micros: u32) -> u32 {
 
-            let umicros = micros.abs() as u32;
+        self.microseconds += micros as u32;
 
-            if umicros > self.microseconds {
-                self.microseconds = u32::MAX - umicros;
-                
-                if self.seconds > 0 {
-                    self.seconds -= 1;
-                }
-            }
+        if self.microseconds >= USEC_PER_HOUR {
 
-            else {
-                self.microseconds -= umicros;
-            }
+            self.microseconds -= USEC_PER_HOUR;
+            self.hours += 1;
 
-        }
-
-        else {
-            self.microseconds += micros as u32;
-        }
-
-        if self.microseconds >= 1_000_000 {
-
-            self.microseconds -= 1_000_000;
-            self.seconds += 1;
-        
-            if self.seconds >= 3600 {
-                self.seconds -= 3600;
-                self.hours += 1;
+            if self.hours == u64::MAX {
+                self.hours = 0;
             }
         
         }
 
-        self.millis()
+        self.microseconds
+    }
+
+    pub fn micros(&self) -> u32 {
+
+        self.microseconds
+    
     }
 
     pub fn millis(&mut self) -> u32 {
-        // Always fits in u32
-        // self.micros < 1_000_000 us = 1_000 ms
-        // self.seconds < 3600 s = 3_600_000 ms
-        // largest possible = 3_601_000 ms
-        // every hour from start up this value resets
-        (self.seconds as u32 * 1_000) + (self.microseconds / 1_000)
+
+        self.microseconds / 1_000
+
     }
 
     pub fn time(&mut self) -> f32 {
-        // Always fits in u32
-        // self.micros < 1_000_000 us = 1_000 ms
-        // self.seconds < 3600 s = 3_600_000 ms
-        // largest possible = 3_601_000 ms
-        // every hour from start up this value resets
-        (self.hours as f32 * 3600.0) + (self.seconds as f32) + (self.microseconds as f32 / 1_000_000.0)
-    }
 
-    pub fn from_millis(&mut self, millis: u32) {
-        self.seconds = (millis / 1_000) as u16;
-        self.microseconds = millis % 1_000;
+        (self.hours * SEC_PER_HOUR) as f32 + (self.microseconds as f32 * SEC_PER_USEC)
+    
     }
 }
