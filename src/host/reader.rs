@@ -88,6 +88,28 @@ impl HidReader {
         }
     }
 
+    pub fn read_raw(&mut self) -> (Option<RIDReport>, DateTime<Utc>) {
+
+        let mut buffer = [0; RID_PACKET_SIZE];
+
+        match &self.teensy.read(&mut buffer) {
+            Ok(value) => {
+                if *value == RID_PACKET_SIZE {
+                    self.layer.pc_stats.update_rx(1.0);
+                    self.timestamp = Instant::now();
+                    return (Some(buffer), Utc::now());
+                }
+
+            }
+            _ => {
+                self.layer.control_flags.initialize(false);
+                self.reconnect();
+            }
+        }
+
+        (None, Utc::now())
+    }
+
     /// Main function to spin and connect the teensys
     /// input to Socks.
     ///

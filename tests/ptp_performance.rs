@@ -46,81 +46,96 @@ use gnuplot::{Caption, Color, Figure};
 
 use rid::host::{interface::*, reader::*, writer::*};
 use rid::*;
+use rid::ptp::*;
 
 #[allow(dead_code)]
 const VERBOSITY: usize = 1;
-pub static TEST_DURATION: u32 = 30;
+pub static TEST_DURATION: f32 = 3600.0;
 
 pub mod ptp_performance {
 
     use super::*;
 
-    pub fn sim_interface(interface: HidInterface) {
+    pub fn demo_rid(interface: HidInterface, reader: &mut HidReader, writer: &mut HidWriter) {
         while !interface.layer.control_flags.is_connected() {}
 
         println!("[HID-Control]: Live");
 
-        let mut ptp_offset_collection = vec![];
-        let mut ptp_stamp = PTPStamp::new(0, 0, 0, 0);
-
-        let mut last_offset = 0.0;
+        let mut local_offset = vec![];
+        let mut ptp_stamp = TimeStamp::new(0, 0, 0, 0);
 
         let mut client_reads = vec![];
-        let mut client_writes = vec![];
         let mut host_reads = vec![];
+        // let mut client_writes = vec![];
 
         let mut t = Instant::now();
-        let mut system_time = rid::Duration::default();
+        let mut system_time = rid::ptp::Duration::default();
 
-        while system_time.millis() / 1_000 < TEST_DURATION && !interface.layer.control_flags.is_shutdown()
+        let mut packet_flight_time = vec![];
+        let mut predicted_hr = vec![];
+        let mut predicted_cr = vec![];
+
+        while system_time.time() < TEST_DURATION && !interface.layer.control_flags.is_shutdown()
         {
             let loopt = Instant::now();
 
             if interface.layer.control_flags.is_connected() {
-                
+
                 let mut buffer = [0; RID_PACKET_SIZE];
                 buffer[RID_MODE_INDEX] = 255;
                 buffer[RID_TOGL_INDEX] = 255;
 
-                ptp_stamp.host_stamp(&mut buffer, system_time.millis());
+                let millis = system_time.add_micros(t.elapsed().as_micros() as i32);
+                t = Instant::now();
 
-                interface.writer_tx(buffer);
+                match reader.read_raw() {
+                    (Some(buffer), _datetime) => {
 
-                match interface.reader_rx.try_recv() {
-                    Ok((buffer, _datetime)) => {
+                        ptp_stamp.host_read(&buffer, millis);
 
-                        ptp_stamp.host_read(&buffer, system_time.millis());
+                        if system_time.millis() > 1 {
 
-                        let (cr, cw, hr, _) = ptp_stamp.marks();
-                        client_reads.push(cr);
-                        client_writes.push(cw);
-                        host_reads.push(hr);
+                            let offset = ptp_stamp.offset() as f64; // calculates the current offset
 
-                        let offset = ptp_stamp.offset() as f64;
+                            let (cr, cw, hr, hw) = ptp_stamp.marks();
 
-                        let millis = system_time.add_micros(t.elapsed().as_micros() as i32);
-                        t = Instant::now();
+                            let hr_act_time = hr as f64 / 1_000.0;
+                            let hr_pred_time = (cw as f64 + offset) / 1_000.0;
 
-                        println!(
-                            "PTP offset: {} ms, offset delta: {}, gain: {}",
-                            offset,
-                            offset - last_offset,
-                            ptp_stamp.get_gain(),
-                        );
+                            let cr_act_time = cr as f64 / 1_000.0;
+                            let cr_pred_time = (hw as f64 - offset) / 1_000.0;
+                            
+                            local_offset.push(offset);
 
-                        println!("Timers\tLocal: {}\tPTP(MCU): {} s", 
-                            millis as f32 / 1_000.0, 
-                            (cr + cw) as f32 / 2_000.0);
+                            predicted_hr.push(hr_pred_time);
+                            predicted_cr.push(cr_pred_time);
 
-                        last_offset = offset;
-                        ptp_offset_collection.push(offset);
+                            client_reads.push(cr_act_time);
+                            host_reads.push(hr_act_time);
+
+                            packet_flight_time.push(hr_act_time - (hw as f64 / 1_000.0));
+
+                            if (local_offset.len()-1) % 10_000 == 0 {
+                                println!("\n\t[PTP-INFO] {hr_act_time:.3} (s)\n\t  Local\t  MCU");
+                            }
+
+                            if local_offset.len() % 250 == 0 {
+                                println!("\t{:.5}\t{:.5}", 
+                                    hr_act_time - hr_pred_time,
+                                    cr_act_time - cr_pred_time,
+                                );
+                            }
+                        }
                     }
                     _ => {}
                 }
+
+                ptp_stamp.host_stamp(&mut buffer, millis);
+                writer.write(&mut buffer);
             }
 
             interface.layer.delay(loopt);
-            // if interface.delay(t) > TEENSY_CYCLE_TIME_US {
+            // if interface.layer.delay(loopt) > TEENSY_CYCLE_TIME_US {
             //     println!("HID Control over cycled {}", t.elapsed().as_micros());
             // }
         }
@@ -130,84 +145,117 @@ pub mod ptp_performance {
         interface.print();
 
         let ptp_mean =
-            ptp_offset_collection.iter().sum::<f64>() / ptp_offset_collection.len() as f64;
-        let ptp_std = (ptp_offset_collection
+            local_offset.iter().sum::<f64>() / local_offset.len() as f64;
+        let ptp_std = (local_offset
             .iter()
             .map(|offset| (offset - ptp_mean) * (offset - ptp_mean))
             .sum::<f64>()
-            / ptp_offset_collection.len() as f64)
+            / local_offset.len() as f64)
             .sqrt();
 
+        let mut cr_max = 0.0;
+        let mut cr_min = f64::MAX;
+        client_reads[1..].iter().for_each(|x| {
+            if *x < cr_min { 
+                cr_min = *x;
+            }
+
+            if *x > cr_max {
+                cr_max = *x;
+            }
+        });
+
+        let mut hr_max = 0.0;
+        let mut hr_min = f64::MAX;
+        host_reads[1..].iter().for_each(|x| {
+            if *x < hr_min { 
+                hr_min = *x;
+            }
+
+            if *x > hr_max {
+                hr_max = *x;
+            }
+        });
+
         println!(
-            "PTP Offset stats: \n\tn samples: {}\n\t(mean, std){ptp_mean} {ptp_std} ms",
-            ptp_offset_collection.len()
+            "PTP Offset stats: \n\tSamples: {}\n\t(mean, std): ({ptp_mean:.3}, {ptp_std:.3}) ms\n\tHOST elapsed time: {}\n\tMCU elapsed time: {}",
+            local_offset.len(),
+            hr_max - hr_min,
+            cr_max - cr_min,
         );
 
-        let x = (1..ptp_offset_collection.len())
-            .map(|x| x as f64)
-            .collect::<Vec<f64>>();
-        // let _sigma_p = ptp_offset_collection
-        //     .iter()
-        //     .map(|x| x + (2.0 * ptp_std))
-        //     .collect::<Vec<f64>>();
-        // let _sigma_n = ptp_offset_collection
-        //     .iter()
-        //     .map(|x| x - (2.0 * ptp_std))
-        //     .collect::<Vec<f64>>();
+        assert_le!(ptp_std, 500.0, "PTP offset STD was too large");
+        assert_le!((TEST_DURATION as f64 - (cr_max - cr_min)).abs(), 0.2, "Time elapsed differs on MCU");
+        assert_le!((TEST_DURATION as f64 - (hr_max - hr_min)).abs(), 0.2, "Time elapsed differs on HOST");
 
-        let offset_slope = (ptp_offset_collection[0] as i32
-            ..*ptp_offset_collection.last().unwrap() as i32)
+        let x = (0..local_offset.len())
             .map(|x| x as f64)
             .collect::<Vec<f64>>();
 
         let mut fg = Figure::new();
+        let mut fg1 = Figure::new();
+        let mut fg2 = Figure::new();
+        let mut fg3 = Figure::new();
+
         fg.axes2d()
             .lines(
                 &x,
-                &ptp_offset_collection,
+                &local_offset,
                 &[Caption("PTP Offset (ms)"), Color("black")],
             )
             .lines(
                 &x,
-                &vec![ptp_mean; ptp_offset_collection.len()],
+                &vec![ptp_mean; local_offset.len()],
                 &[Caption("Average"), Color("green")],
-            );
-
-        let _ = fg.show();
-
-        let x1 = (1..host_reads.len())
-            .map(|x| x as u32)
-            .collect::<Vec<u32>>();
-
-        let mut fg1 = Figure::new();
-        fg1.axes2d()
-            .lines(
-                &x1,
-                &client_reads,
-                &[Caption("Client Read"), Color("red")],
             )
             .lines(
-                &x1,
-                &host_reads,
-                &[Caption("Host Read + offset"), Color("green")],
+                &x,
+                &vec![ptp_mean + ptp_std; local_offset.len()],
+                &[Caption("2 Sigma bound"), Color("red")],
+            )
+            .lines(
+                &x,
+                &vec![ptp_mean - ptp_std; local_offset.len()],
+                &[Color("red")],
+            );
+        
+        fg1.axes2d()
+            .lines(
+                &x,
+                &(host_reads.iter().zip(predicted_hr).map(|(&a, b)| a - b).collect::<Vec<f64>>()),
+                &[Caption("host read prediction error (client time -> host time)"), Color("black")],
+            );
+        
+        fg2.axes2d()
+            .lines(
+                &x,
+                &(client_reads.iter().zip(predicted_cr).map(|(&a, b)| a - b).collect::<Vec<f64>>()),
+                &[Caption("client read prediction error"), Color("black")],
             );
 
-        let _ = fg1.show();
-        // assert_le!(
-        //     (interface.layer.pc_stats.n_tx() - interface.layer.mcu_stats.n_tx()).abs(),
-        //     (TEST_DURATION * 5) as f64,
-        //     "PC and MCU sent different numbers of packets"
-        // );
-        // assert_le!(
-        //     ((TEST_DURATION as f64 / TEENSY_CYCLE_TIME_S) - interface.layer.mcu_stats.n_tx()).abs(),
-        //     (TEST_DURATION * 500) as f64,
-        //     "Not enough packts sent by mcu"
-        // );
-        // assert_le!(
-        //     ((TEST_DURATION as f64 / TEENSY_CYCLE_TIME_S) - interface.layer.pc_stats.n_tx()).abs(),
-        //     (TEST_DURATION * 500) as f64,
-        //     "Not enough packts sent by pc"
-        // );
+
+        fg3.axes2d()
+            .lines(
+                &x,
+                &packet_flight_time,
+                &[Caption("packet flight time"), Color("black")],
+            );
+
+        
+        let _ = fg.show();
+        fg.close();
+
+        let _ = fg1.show_and_keep_running();
+        let _ = fg2.show();
+        fg1.close();
+        fg2.close();
+
+        let _ = fg3.show();
+        fg3.close();
+
+
+        
+
     }
 
     #[test]
@@ -219,29 +267,6 @@ pub mod ptp_performance {
 
         interface.layer.print();
 
-        let reader_handle = Builder::new()
-            .name("HID Reader".to_string())
-            .spawn(move || {
-                reader.pipeline();
-            })
-            .unwrap();
-
-        let writer_handle = Builder::new()
-            .name("HID Writer".to_string())
-            .spawn(move || {
-                writer.pipeline();
-            })
-            .unwrap();
-
-        let interface_sim = Builder::new()
-            .name("HID Control".to_string())
-            .spawn(move || {
-                sim_interface(interface);
-            })
-            .unwrap();
-
-        reader_handle.join().expect("HID Reader failed");
-        interface_sim.join().expect("HID Control failed");
-        writer_handle.join().expect("HID Writer failed");
+        demo_rid(interface, &mut reader, &mut writer);
     }
 }

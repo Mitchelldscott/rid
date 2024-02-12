@@ -14,5 +14,7 @@ crossbeam-channel = { version = "0.5.8", optional = true }
 serde = { version = "1.0.190", features = ["derive"], optional = true }
 gnuplot = { version = "0.0.41", optional = true }
 
+# fuck, need this for tests (host)
+# gotta fix hostside stuff
 [features]
 std = ["dep:hidapi", "dep:chrono", "dep:yaml-rust", "dep:more-asserts", "dep:crossbeam-channel", "dep:serde", "dep:gnuplot"]
