@@ -120,7 +120,7 @@ pub mod ptp_performance {
 
                 RID_PACKET_SIZE => {
 
-                    if micros > 2_000 {
+                    if micros > 5_000 {
 
                         let offset = layer.ptp_stamp.offset(); // calculates the current offset
 
