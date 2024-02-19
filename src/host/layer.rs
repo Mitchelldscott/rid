@@ -36,21 +36,14 @@ pub struct RIDLayer {
     // Device info for initializing connection
     pub vid: u16,
     pub pid: u16,
-    pub sample_time: f64,
+    pub sample_time: u32,
 
     pub hidapi: HidApi,
     pub device: HidDevice,
 
     pub system_time: Duration,
     pub ptp_stamp: TimeStamp,
-    pub connected: bool,
 
-
-    // Layer Statistics
-    // pub pc_stats: NetFlowStats,
-    // pub mcu_stats: NetFlowStats,
-    // Layer control vectors
-    // pub control_flags: HidControlFlags,
 }
 
 pub fn new_device(vid: u16, pid: u16, hidapi: &mut HidApi) -> HidDevice {
@@ -63,14 +56,13 @@ pub fn new_device(vid: u16, pid: u16, hidapi: &mut HidApi) -> HidDevice {
     }
 
 impl RIDLayer {
-    pub fn new(vid: u16, pid: u16, sample_time: f64) -> RIDLayer {
+    pub fn new(vid: u16, pid: u16, sample_time: u32) -> RIDLayer {
 
         let mut hidapi = HidApi::new().expect("Failed to create API instance");
         let device = new_device(vid, pid, &mut hidapi);
 
         let system_time = Duration::default();
         let ptp_stamp = TimeStamp::new(0, 0, 0, 0);
-        let connected = false;
 
         RIDLayer {
             vid,
@@ -82,18 +74,16 @@ impl RIDLayer {
 
             system_time,
             ptp_stamp,
-            connected,
 
         }
     }
 
-    pub fn read(&mut self, buffer: &mut RIDReport) -> usize {
+    pub fn read(&mut self, buffer: &mut RIDReport, micros: u32) -> usize {
         
         match self.device.read(buffer) {
             Ok(val) => {
 
-                self.connected = true;
-                self.ptp_stamp.host_read(buffer, self.system_time.micros());
+                self.ptp_stamp.host_read(buffer, self.system_time.micros() + micros);
                 
                 val
 
@@ -109,9 +99,9 @@ impl RIDLayer {
 
     }
 
-    pub fn write(&mut self, buffer: &mut RIDReport) {
+    pub fn write(&mut self, buffer: &mut RIDReport, micros: u32) {
         
-        self.ptp_stamp.host_stamp(buffer, self.system_time.micros());
+        self.ptp_stamp.host_stamp(buffer, self.system_time.micros() + micros);
 
         match self.device.write(buffer) {
             Ok(RID_PACKET_SIZE) => {},
@@ -120,14 +110,18 @@ impl RIDLayer {
 
     }
 
-    pub fn delay(&self, time: Instant) -> f64 {
-        let mut t = time.elapsed().as_micros() as f64;
+    pub fn delay(&self, time: Instant) -> u32 {
+        let mut t = time.elapsed().as_micros() as u32;
 
         while t < self.sample_time {
-            t = time.elapsed().as_micros() as f64;
+            t = time.elapsed().as_micros() as u32;
         }
         
         t
+    }
+
+    pub fn timestep(&mut self, t: Instant) -> u32 {
+        self.system_time.add_micros(self.delay(t))
     }
 
     // pub fn print(&self) {

@@ -81,7 +81,6 @@ pub mod ptp_performance {
 
         let mut local_offset = vec![];
 
-        let mut t = Instant::now();
         let mut packet_flight_time = vec![];
 
         let mut host_offset_error: Vec<f32> = vec![];
@@ -102,25 +101,24 @@ pub mod ptp_performance {
 
         let mut write_count = 0.0;
 
-        layer.connected = true;
+        let mut t = Instant::now();
 
-        while layer.system_time.time() < TEST_DURATION && layer.connected
+        while layer.system_time.time() < TEST_DURATION
         {
 
 
-            let micros = layer.system_time.add_micros(t.elapsed().as_micros() as u32);
-            t = Instant::now();
+            // let micros = layer.timestep(t);
 
             let mut buffer = [0; RID_PACKET_SIZE];
             buffer[RID_MODE_INDEX] = 255;
             buffer[RID_TOGL_INDEX] = 255;
 
 
-            match layer.read(&mut buffer) {
+            match layer.read(&mut buffer, t.elapsed().as_micros() as u32) {
 
                 RID_PACKET_SIZE => {
 
-                    if micros > 5_000 {
+                    if layer.system_time.micros() > 1_000 {
 
                         let offset = layer.ptp_stamp.offset(); // calculates the current offset
 
@@ -186,8 +184,10 @@ pub mod ptp_performance {
             }
 
             write_count += 1.0;
-            layer.write(&mut buffer);
-            layer.delay(t);
+            layer.write(&mut buffer, t.elapsed().as_micros() as u32);
+
+            layer.timestep(t);
+            t = Instant::now();
 
             // if layer.delay(t) > TEENSY_CYCLE_TIME_US {
             //     println!("HID Control over cycled {}", t.elapsed().as_micros());
@@ -211,10 +211,14 @@ pub mod ptp_performance {
         let host_scaled = host_truth.iter().map(|&x| x / 1_000_000.0).collect::<Vec<f32>>();
 
         println!(
-            "PTP Offset stats: \n\tSamples: {}\n\t(mean, std): ({ptp_mean:.3}, {ptp_std:.3}) s\n\tHOST elapsed time: {} s\n\tMCU elapsed time: {} s",
+            "PTP Offset stats: \n\tSamples: {}\n\t(mean, std): ({ptp_mean:.3}, {ptp_std:.3}) s\n\tHOST elapsed time: {} s [{}, {}]\n\tMCU elapsed time: {} s [{}, {}]",
             local_offset.len(),
             (hr_max - hr_min) / 1_000_000.0,
+            hr_min / 1_000_000.0,
+            hr_max / 1_000_000.0,
             (cr_max - cr_min) / 1_000_000.0,
+            cr_min / 1_000_000.0,
+            cr_max / 1_000_000.0,
         );
 
         assert_le!((TEST_DURATION as f64 / TEENSY_CYCLE_TIME_S) - write_count, 25.0, "Insufficient writes to client");
@@ -311,7 +315,7 @@ pub mod ptp_performance {
         /*
             Start an hid layer
         */
-        let mut layer = RIDLayer::new(TEENSY_DEFAULT_VID, TEENSY_DEFAULT_PID, TEENSY_CYCLE_TIME_US);
+        let mut layer = RIDLayer::new(TEENSY_DEFAULT_VID, TEENSY_DEFAULT_PID, TEENSY_CYCLE_TIME_US as u32);
 
         demo_rid(&mut layer);
     }
