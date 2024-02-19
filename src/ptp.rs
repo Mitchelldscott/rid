@@ -25,6 +25,8 @@
 
 use crate::RIDReport;
 
+use core::ops::Index;
+
 pub const PTP_GAIN_INDEX: usize = 44;
 pub const PTP_CRTS_INDEX: usize = 48;
 pub const PTP_CWTS_INDEX: usize = 52;
@@ -130,24 +132,41 @@ impl TimeStamp {
     }
 }
 
+impl Index<usize> for TimeStamp {
+    type Output = u32;
+
+    fn index(&self, idx: usize) -> &Self::Output {
+        match idx {
+            0 => &self.client_read,
+            1 => &self.client_write,
+            2 => &self.host_read,
+            _ => &self.host_write,
+        }
+    }
+}
+
 pub struct Duration {
     hours: u64,
     microseconds: u32, 
 }
 
 impl Duration {
-    pub fn default() -> Duration {
+    pub fn new(hours: u64, microseconds: u32) -> Duration {
         Duration {
-            hours: 0,
-            microseconds: 0,
+            hours,
+            microseconds,
         }
+    }
+
+    pub fn default() -> Duration {
+        Duration::new(0, 0)
     }
 
     pub fn add_micros(&mut self, micros: u32) -> u32 {
 
         self.microseconds += micros as u32;
 
-        if self.microseconds >= USEC_PER_HOUR {
+        while self.microseconds >= USEC_PER_HOUR {
 
             self.microseconds -= USEC_PER_HOUR;
             self.hours += 1;
