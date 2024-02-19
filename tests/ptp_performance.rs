@@ -122,7 +122,7 @@ pub mod ptp_performance {
 
                         ptp_stamp.host_read(&buffer, micros);
 
-                        if system_time.micros() > 1_000 {
+                        if system_time.micros() > 5_000 {
 
                             let offset = ptp_stamp.offset(); // calculates the current offset
 
@@ -214,10 +214,15 @@ pub mod ptp_performance {
         let host_scaled = host_truth.iter().map(|&x| x / 1_000_000.0).collect::<Vec<f32>>();
 
         println!(
-            "PTP Offset stats: \n\tSamples: {}\n\t(mean, std): ({ptp_mean:.3}, {ptp_std:.3}) s\n\tHOST elapsed time: {} s\n\tMCU elapsed time: {} s",
+            "PTP Offset stats: \n\tSamples: {}\n\t(mean, std): ({ptp_mean:.3}, {ptp_std:.3}) s\n\tHOST elapsed time: {} s [{},{}]\n\tMCU elapsed time: {} s [{}, {}]",
             local_offset.len(),
-            hr_max - hr_min,
-            cr_max - cr_min,
+            (hr_max - hr_min) / 1_000_000.0,
+            hr_min / 1_000_000.0,
+            hr_max / 1_000_000.0,
+            (cr_max - cr_min) / 1_000_000.0,
+            cr_min / 1_000_000.0,
+            cr_max / 1_000_000.0,
+
         );
 
         assert_le!(ptp_std, 0.5, "PTP offset STD was too large");
