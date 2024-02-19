@@ -100,6 +100,8 @@ pub mod ptp_performance {
         let mut hr_min = f32::MAX;
         let mut hr_max = 0.0;
 
+        let mut write_count = 0.0;
+
         layer.connected = true;
 
         while layer.system_time.time() < TEST_DURATION && layer.connected
@@ -183,12 +185,13 @@ pub mod ptp_performance {
                 _ => {}
             }
 
+            write_count += 1.0;
             layer.write(&mut buffer);
-            // layer.delay(t);
+            layer.delay(t);
 
-            if layer.delay(t) > TEENSY_CYCLE_TIME_US {
-                println!("HID Control over cycled {}", t.elapsed().as_micros());
-            }
+            // if layer.delay(t) > TEENSY_CYCLE_TIME_US {
+            //     println!("HID Control over cycled {}", t.elapsed().as_micros());
+            // }
         }
 
         // interface.layer.control_flags.shutdown();
@@ -214,6 +217,7 @@ pub mod ptp_performance {
             (cr_max - cr_min) / 1_000_000.0,
         );
 
+        assert_le!((TEST_DURATION as f64 / TEENSY_CYCLE_TIME_S) - write_count, 25.0, "Insufficient writes to client");
         assert_le!(ptp_std, 0.5, "PTP offset STD was too large");
         assert_le!(cr_min, cr_max, "MCU Min and Max time is invalid");
         assert_le!((TEST_DURATION - ((cr_max - cr_min) / 1_000_000.0)).abs(), 0.2, "Time elapsed differs on MCU");

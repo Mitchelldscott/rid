@@ -54,17 +54,12 @@ pub struct RIDLayer {
 }
 
 pub fn new_device(vid: u16, pid: u16, hidapi: &mut HidApi) -> HidDevice {
-        let device = match hidapi.open(vid, pid) {
-            Ok(dev) => {
-                
-                dev.set_blocking_mode(false).unwrap();
-                Some(dev)
-
-            }
-            Err(_) => None,
-        };
         
-        device.expect("[HID-Layer] Failed to open device")
+        let device = hidapi.open(vid, pid).expect("[HID-Layer] Failed to open device");
+                
+        device.set_blocking_mode(false).unwrap();
+
+        device
     }
 
 impl RIDLayer {
