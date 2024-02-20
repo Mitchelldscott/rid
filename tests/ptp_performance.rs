@@ -108,6 +108,9 @@ pub mod ptp_performance {
 
         let mut t = Instant::now();
 
+        println!("\n[PTP-DEMO]\tC(t) = {m} * H(t) + {b}");
+        println!("Host (s)\t\tClient (s)\t\tConversion Error <offset, pred> (us)");
+
         while layer.system_time.time() < TEST_DURATION
         {
 
@@ -154,33 +157,32 @@ pub mod ptp_performance {
                             hr_max = hr_s;
                         }
 
-                        m = (cr_max - cr_min) / (hr_max - hr_min);
-                        b = cr_max - ((cr_max - cr_min) / (hr_max - hr_min) * hr_max);
-
-                        let host_measure = hr;
-                        let cl_offset = cw - offset;
-
-                        let client_measure = cr;
-                        let ho_offset = hw_new + offset;
-                        
-                        local_offset.push(offset / 1_000_000.0);
-
-                        host_truth.push(host_measure);
-                        client_truth.push(client_measure / 1_000_000.0);
-
-                        host_offset_error.push(client_measure - ho_offset);
-                        client_offset_error.push(host_measure - cl_offset);
-
-
-                        client_prediction.push(((m * TEST_DURATION * 1_000_000.0) + b) / 1_000_000.0); // predict client time at 10s local time
-
-                        if (local_offset.len()-1) % 10_000 == 0 {
+                        if write_count as u32 % (100 * TEST_DURATION as u32) == 0 {
                             println!("\n[PTP-DEMO]\tC(t) = {m} * H(t) + {b}");
                             println!("Host (s)\t\tClient (s)\t\tConversion Error <offset, pred> (us)");
                         }
 
+                        if write_count as u32 % TEST_DURATION as u32 == 0 {
 
-                        if local_offset.len() % 250 == 0 {
+                            m = (cr_max - cr_min) / (hr_max - hr_min);
+                            b = cr_max - ((cr_max - cr_min) / (hr_max - hr_min) * hr_max);
+
+                            let host_measure = hr;
+                            let cl_offset = cw - offset;
+
+                            let client_measure = cr;
+                            let ho_offset = hw_new + offset;
+                            
+                            local_offset.push(offset / 1_000_000.0);
+
+                            host_truth.push(host_measure);
+                            client_truth.push(client_measure / 1_000_000.0);
+
+                            host_offset_error.push(client_measure - ho_offset);
+                            client_offset_error.push(host_measure - cl_offset);
+
+                            client_prediction.push(((m * TEST_DURATION * 1_000_000.0) + b) / 1_000_000.0); // predict client time at 10s local time
+
                             println!("  {:.4}\t\t{:.4}\t\t{:.0}\t{:.0}", 
                                 host_measure / 1_000_000.0,
                                 client_measure / 1_000_000.0,
@@ -196,14 +198,9 @@ pub mod ptp_performance {
             layer.timestep(t);
             t = Instant::now();
 
-            // if layer.delay(t) > TEENSY_CYCLE_TIME_US {
-            //     println!("HID Control over cycled {}", t.elapsed().as_micros());
-            // }
         }
 
-        // interface.layer.control_flags.shutdown();
         println!("[HID-Control]: shutdown");
-        // interface.print();
 
         let ptp_mean =
             local_offset.iter().sum::<f32>() / local_offset.len() as f32;
