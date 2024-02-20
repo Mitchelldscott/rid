@@ -44,13 +44,18 @@ use more_asserts::assert_le;
 
 use gnuplot::{Caption, Color, Figure};
 
-use rid::host::{layer::*};
-use rid::*;
-use rid::ptp::*;
+use rid::{
+    ptp::*,
+    host::*,
+    RID_PACKET_SIZE,
+    RID_MODE_INDEX, RID_TOGL_INDEX,
+    RID_DEFAULT_VID, RID_DEFAULT_PID,
+    RID_CYCLE_TIME_S, RID_CYCLE_TIME_US,
+};
 
 #[allow(dead_code)]
 const VERBOSITY: usize = 1;
-pub static TEST_DURATION: f32 = 10.0;
+pub static TEST_DURATION: f32 = 3600.0;
 
 pub mod ptp_performance {
 
@@ -106,13 +111,13 @@ pub mod ptp_performance {
         while layer.system_time.time() < TEST_DURATION
         {
 
-
-            // let micros = layer.timestep(t);
-
             let mut buffer = [0; RID_PACKET_SIZE];
             buffer[RID_MODE_INDEX] = 255;
             buffer[RID_TOGL_INDEX] = 255;
 
+
+            write_count += 1.0;
+            layer.write(&mut buffer, t.elapsed().as_micros() as u32);
 
             match layer.read(&mut buffer, t.elapsed().as_micros() as u32) {
 
@@ -122,10 +127,16 @@ pub mod ptp_performance {
 
                         let offset = layer.ptp_stamp.offset(); // calculates the current offset
 
-                        let (cr, cw, hr, hw) = layer.ptp_stamp.marks();
+                        let cr = layer.ptp_stamp[0] as f32;
+                        let cw = layer.ptp_stamp[1] as f32;
+                        let hr = layer.ptp_stamp[2] as f32;
+                        let hw_new = layer.ptp_stamp[3] as f32;
+                        let (_, hw) = layer.ptp_stamp.read_host_stamp(&buffer);
 
-                        let cr_s = cr as f32;
-                        let hr_s = hr as f32;
+                        packet_flight_time.push(hr - hw as f32);
+
+                        let cr_s = layer.ptp_stamp[0] as f32;
+                        let hr_s = layer.ptp_stamp[2] as f32;
 
                         if cr_s < cr_min { 
                             cr_min = cr_s;
@@ -146,11 +157,11 @@ pub mod ptp_performance {
                         m = (cr_max - cr_min) / (hr_max - hr_min);
                         b = cr_max - ((cr_max - cr_min) / (hr_max - hr_min) * hr_max);
 
-                        let host_measure = hr as f32;
-                        let cl_offset = cw as f32 + offset;
+                        let host_measure = hr;
+                        let cl_offset = cw - offset;
 
-                        let client_measure = cr as f32;
-                        let ho_offset = hw as f32 - offset;
+                        let client_measure = cr;
+                        let ho_offset = hw_new + offset;
                         
                         local_offset.push(offset / 1_000_000.0);
 
@@ -160,13 +171,12 @@ pub mod ptp_performance {
                         host_offset_error.push(client_measure - ho_offset);
                         client_offset_error.push(host_measure - cl_offset);
 
-                        packet_flight_time.push(host_measure - (hw as f32));
 
                         client_prediction.push(((m * TEST_DURATION * 1_000_000.0) + b) / 1_000_000.0); // predict client time at 10s local time
 
                         if (local_offset.len()-1) % 10_000 == 0 {
-                            println!("\n\t[PTP-DEMO]\tC(t) = {m} * H(t) + {b}");
-                            println!("\tHost (s)\t\tClient (s)\t\tConversion Error <offset, pred> (us)");
+                            println!("\n[PTP-DEMO]\tC(t) = {m} * H(t) + {b}");
+                            println!("Host (s)\t\tClient (s)\t\tConversion Error <offset, pred> (us)");
                         }
 
 
@@ -182,9 +192,6 @@ pub mod ptp_performance {
                 }
                 _ => {}
             }
-
-            write_count += 1.0;
-            layer.write(&mut buffer, t.elapsed().as_micros() as u32);
 
             layer.timestep(t);
             t = Instant::now();
@@ -221,11 +228,7 @@ pub mod ptp_performance {
             cr_max / 1_000_000.0,
         );
 
-        assert_le!((TEST_DURATION as f64 / TEENSY_CYCLE_TIME_S) - write_count, 25.0, "Insufficient writes to client");
-        assert_le!(ptp_std, 0.5, "PTP offset STD was too large");
-        assert_le!(cr_min, cr_max, "MCU Min and Max time is invalid");
-        assert_le!((TEST_DURATION - ((cr_max - cr_min) / 1_000_000.0)).abs(), 0.2, "Time elapsed differs on MCU");
-        assert_le!((TEST_DURATION - ((hr_max - hr_min) / 1_000_000.0)).abs(), 0.2, "Time elapsed differs on HOST");
+        
 
         let x = (0..local_offset.len())
             .map(|x| x as f32)
@@ -308,6 +311,12 @@ pub mod ptp_performance {
 
         let _ = fg3.show();
         fg3.close();
+
+        assert_le!(0.9, write_count / (TEST_DURATION as f64 / RID_CYCLE_TIME_S), "Insufficient writes to client");
+        assert_le!(ptp_std, TEST_DURATION / 200.0, "PTP offset STD was too large");
+        assert_le!(cr_min, cr_max, "MCU Min and Max time is invalid");
+        assert_le!(0.98, ((cr_max - cr_min) / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on MCU");
+        assert_le!(0.98, ((hr_max - hr_min) / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on HOST");
     }
 
     #[test]
@@ -315,7 +324,7 @@ pub mod ptp_performance {
         /*
             Start an hid layer
         */
-        let mut layer = RIDLayer::new(TEENSY_DEFAULT_VID, TEENSY_DEFAULT_PID, TEENSY_CYCLE_TIME_US as u32);
+        let mut layer = RIDLayer::new(RID_DEFAULT_VID, RID_DEFAULT_PID);
 
         demo_rid(&mut layer);
     }

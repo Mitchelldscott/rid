@@ -17,46 +17,51 @@ use hidapi::{HidApi, HidDevice};
 // use chrono::{DateTime, Utc};
 use std::time::Instant;
 
-use crate::{RIDReport, RID_PACKET_SIZE, ptp::{Duration, TimeStamp}};
-// use crate::host::data_structures::{HidControlFlags, NetFlowStats};
+use crate::{
+    RIDReport, RID_PACKET_SIZE, RID_CYCLE_TIME_US,
+    ptp::{Duration, TimeStamp}
+};
 
-pub static MCU_NO_COMMS_TIMEOUT_S: u64 = 10;
-pub static MCU_NO_COMMS_RESET_MS: u128 = 10;
-pub static MCU_RECONNECT_DELAY_US: f64 = 5.0 * 1E6;
+/// helper function to create a new HidDevice
+/// not really relevant since monothread
+pub fn new_device(vid: u16, pid: u16, hidapi: &mut HidApi) -> HidDevice {
+        
+    let device = hidapi.open(vid, pid).expect("[HID-Layer] Failed to open device");
+            
+    device.set_blocking_mode(false).unwrap();
 
-pub static TEENSY_CYCLE_TIME_S: f64 = 0.001;
-pub static TEENSY_CYCLE_TIME_MS: f64 = TEENSY_CYCLE_TIME_S * 1E3;
-pub static TEENSY_CYCLE_TIME_US: f64 = TEENSY_CYCLE_TIME_S * 1E6;
-pub static TEENSY_CYCLE_TIME_ER: f64 = TEENSY_CYCLE_TIME_US + 50.0; // err threshold (before prints happen, deprecated?)
+    device
+}
 
-pub static TEENSY_DEFAULT_VID: u16 = 0x1331;
-pub static TEENSY_DEFAULT_PID: u16 = 0x0001;
 
+/// the host side interface to the microcontroller
+/// this should provide an abstraction for the
+/// task deploy system to utilize.
 pub struct RIDLayer {
-    // Device info for initializing connection
+    /// USB device vid
     pub vid: u16,
+    /// USB device pid
     pub pid: u16,
-    pub sample_time: u32,
 
+    /// USB hidapi (C wrapper lib)
     pub hidapi: HidApi,
+    /// USB HidDevice class
     pub device: HidDevice,
 
+    /// ['Duration'] keeps track of host "system_time", H(t)
     pub system_time: Duration,
+    /// ['TimeStamp'] for synchronization
     pub ptp_stamp: TimeStamp,
 
 }
 
-pub fn new_device(vid: u16, pid: u16, hidapi: &mut HidApi) -> HidDevice {
-        
-        let device = hidapi.open(vid, pid).expect("[HID-Layer] Failed to open device");
-                
-        device.set_blocking_mode(false).unwrap();
-
-        device
-    }
-
 impl RIDLayer {
-    pub fn new(vid: u16, pid: u16, sample_time: u32) -> RIDLayer {
+    /// Create a new RID layer
+    /// Connects to the device with the specified vid, pid
+    /// panics if the device cant be found. If it does not 
+    /// have permission check your udev rules and make sure
+    /// it includes the vid pid.
+    pub fn new(vid: u16, pid: u16) -> RIDLayer {
 
         let mut hidapi = HidApi::new().expect("Failed to create API instance");
         let device = new_device(vid, pid, &mut hidapi);
@@ -67,7 +72,6 @@ impl RIDLayer {
         RIDLayer {
             vid,
             pid,
-            sample_time,
 
             hidapi,
             device,
@@ -78,6 +82,7 @@ impl RIDLayer {
         }
     }
 
+    /// try reading a Report into a buffer
     pub fn read(&mut self, buffer: &mut RIDReport, micros: u32) -> usize {
         
         match self.device.read(buffer) {
@@ -99,6 +104,7 @@ impl RIDLayer {
 
     }
 
+    /// try writing a Report from a buffer
     pub fn write(&mut self, buffer: &mut RIDReport, micros: u32) {
         
         self.ptp_stamp.host_stamp(buffer, self.system_time.micros() + micros);
@@ -110,28 +116,21 @@ impl RIDLayer {
 
     }
 
+    /// Delay helper, makes loops readable
     pub fn delay(&self, time: Instant) -> u32 {
-        let mut t = time.elapsed().as_micros() as u32;
+        let mut t = time.elapsed().as_micros();
 
-        while t < self.sample_time {
-            t = time.elapsed().as_micros() as u32;
+        while t < RID_CYCLE_TIME_US as u128 {
+            t = time.elapsed().as_micros();
         }
         
-        t
+        t as u32
     }
 
+    /// another delay helper, makes loops real nice
     pub fn timestep(&mut self, t: Instant) -> u32 {
         self.system_time.add_micros(self.delay(t))
     }
-
-    // pub fn print(&self) {
-    //     println!("[HID-Layer]: {} {}", self.vid, self.pid);
-    //     self.control_flags.print();
-    //     println!("[PC]");
-    //     self.pc_stats.print();
-    //     println!("[MCU]");
-    //     self.mcu_stats.print();
-    // }
 }
 
 
