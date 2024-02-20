@@ -129,9 +129,8 @@ impl RIDLayer {
         match self.device.read(buffer) {
             Ok(val) => {
 
-                self.ptp_stamp.host_read(buffer, self.system_time.micros());
-                self.timer = Instant::now();
-                
+                self.ptp_stamp.host_read(buffer, self.system_time.micros() + self.timer.elapsed().as_micros() as u32);
+
                 val
 
             },
@@ -149,8 +148,7 @@ impl RIDLayer {
     /// try writing a Report from a buffer
     pub fn write(&mut self, buffer: &mut RIDReport) {
         
-        self.ptp_stamp.host_stamp(buffer, self.system_time.micros());
-        self.timer = Instant::now();
+        self.ptp_stamp.host_stamp(buffer, self.system_time.micros() + self.timer.elapsed().as_micros() as u32);
 
         match self.device.write(buffer) {
             Ok(RID_PACKET_SIZE) => {},
@@ -198,7 +196,7 @@ impl RIDLayer {
     }
 
     /// Delay helper, makes loops readable
-    pub fn delay(&self) -> u32 {
+    pub fn delay(&mut self) -> u32 {
 
         let mut t = self.timer.elapsed().as_micros();
 
@@ -207,6 +205,8 @@ impl RIDLayer {
             t = self.timer.elapsed().as_micros();
         
         }
+
+        self.timer = Instant::now();
         
         t as u32
 
@@ -215,7 +215,8 @@ impl RIDLayer {
     /// another delay helper, makes loops real nice
     pub fn timestep(&mut self) -> u32 {
 
-        self.system_time.add_micros(self.delay())
+        let t = self.delay();
+        self.system_time.add_micros(t)
     
     }
 
@@ -236,32 +237,37 @@ impl RIDLayer {
 
             RID_PACKET_SIZE => {
 
+
                 if self.client_start == 0.0 {
 
                     self.client_start = self.ptp_stamp[1] as f32;
+
+                    return 0.0;
                 
                 }
+                else {
 
-                // Handles hour counts wrapping
-                if self.ptp_stamp[3] < prev_host_read {
+                    // Handles hour counts wrapping
+                    if self.ptp_stamp[3] < prev_host_read {
 
-                    self.host_hours += 1.0;
+                        self.host_hours += 1.0;
+
+                    }
+                    
+                    if self.ptp_stamp[1] < prev_client_read {
+
+                        self.client_hours += 1.0;
+                    }
+
+                    let (_, hw) = self.ptp_stamp.read_host_stamp(&buffer);
+
+                    // Updates the linear offset coefficients
+                    self.linear_offset[0] = self.client_elapsed() / self.host_elapsed(self.ptp_stamp[2] as f32);
+                    self.linear_offset[1] = self.ptp_stamp[1] as f32 - (self.linear_offset[0] * (self.ptp_stamp[3] as f32));
+
+                    return self.ptp_stamp[2] as f32 - hw as f32;
 
                 }
-
-                if self.ptp_stamp[1] < prev_client_read {
-
-                    self.client_hours += 1.0;
-                
-                }
-
-                // Updates the linear offset coefficients
-                self.linear_offset[0] = self.client_elapsed() / self.host_elapsed(self.ptp_stamp[2] as f32);
-                self.linear_offset[1] = self.ptp_stamp[1] as f32 - (self.linear_offset[0] * (self.ptp_stamp[3] as f32));
-
-                let (_, hw) = self.ptp_stamp.read_host_stamp(&buffer);
-
-                self.ptp_stamp[2] as f32 - hw as f32
 
             }
             _ => 0.0,
@@ -281,8 +287,8 @@ impl RIDLayer {
         let client_read = self.ptp_stamp[0] as f32;
         let client_write = self.ptp_stamp[1] as f32;
 
-        let host_err = host_write - self.ptp_to_host(client_write);
-        let client_err = client_read - self.ptp_to_client(host_read);
+        let host_err = host_read - self.ptp_to_host(client_write);
+        let client_err = client_write - self.ptp_to_client(host_read);
 
         println!("  {:.4}\t\t{:.4}\t\t{:.0}\t{:.0}", 
             host_read / 1_000_000.0,

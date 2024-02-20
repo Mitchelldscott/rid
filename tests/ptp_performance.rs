@@ -143,7 +143,7 @@ pub mod ptp_performance {
         println!("[HID-Control]: shutdown {}", layer.host_elapsed(layer.ptp_stamp[2] as f32));
 
         let ptp_mean =
-            local_offset.iter().sum::<f32>() / local_offset.len() as f32;
+            local_offset.iter().sum::<f32>() / (local_offset.len() as f32);
         let ptp_std = (local_offset
             .iter()
             .map(|offset| (offset - ptp_mean) * (offset - ptp_mean))
@@ -250,7 +250,7 @@ pub mod ptp_performance {
         fg3.close();
 
         assert_le!(0.9, write_count / (TEST_DURATION as f64 / RID_CYCLE_TIME_S), "Insufficient writes to client");
-        assert_le!(ptp_std, TEST_DURATION / 200.0, "PTP offset STD was too large");
+        assert_le!(ptp_std / 1_000_000.0, TEST_DURATION / 200.0, "PTP offset STD was too large");
         assert_le!(0.0, layer.client_elapsed(), "MCU elapsed time is invalid");
         assert_le!(0.98, (layer.client_elapsed() / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on MCU");
         assert_le!(0.98, (layer.host_elapsed(layer.ptp_stamp[2] as f32) / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on HOST");
