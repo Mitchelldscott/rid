@@ -35,17 +35,62 @@ pub const PTP_HWTS_INDEX: usize = 60;
 pub const SEC_PER_HOUR: u64 = 3_600;
 /// Microsecond to Second constant: microseconds = seconds * USEC_PER_SEC
 pub const USEC_PER_SEC: u32 = 1_000_000;
-/// Microsecond to Hour constant: microseconds = hours * USEC_PER_HOUR
-pub const USEC_PER_HOUR: u32 = USEC_PER_SEC * SEC_PER_HOUR as u32;
+
+
+/// # Calculates the PTP offset
+/// 
+/// Assumes events go: host write (t1) -> client read (t2) -> client write (t3) -> host read (t4)
+/// 
+/// C(t) = H(t) + o(t)
+///
+/// This equation can be rearranged to calculate more accurately at different events
+/// 
+/// o(t) + d = (t2 - t1), -o(t) + d = (t4 - t3)
+/// 
+/// 2 * o = (t2 - t1) - (t4 + t3) - d + d
+/// 
+/// o(t) = (t2 + t3 - t1 - t4) / 2
+/// 
+///
+/// ```
+///
+/// // Done on host, after host read event
+/// let client_read     =  1;    // client read, then wrote
+/// let client_write    =  2;
+///
+/// let host_read       = 10;    // host read, but has not written
+/// let host_write      =  9;
+///
+/// let offset = offset(host_write, client_read, client_write, host_read);
+///
+/// assert_eq!(client_read, host_write + offset);
+///
+/// ```
+///
+/// ```
+/// // Done on client, after client read event
+/// let client_read     = 3;    // client read, but hasn't written
+/// let client_write    = 2;
+///
+/// let host_read       = 10;   // host read, then wrote
+/// let host_write      = 11;
+///
+/// let offset = offset(host_write, client_read, client_write, host_read);
+///
+/// assert_eq!(client_write - offset, host_read);
+/// ```
+
+pub fn ptp_offset(t1: f32, t2: f32, t3: f32, t4: f32) -> f32 {
+    (t2 + t3 - t1 - t4) / 2.0
+}
 
 #[derive(Debug)]
 /// # Precision Timing Protocol implementation
-/// This time stamp is used by a host and client to share
-/// clock measurments based on message passing events. The algorithm
-/// uses these events to estimate an offset between the host and
-/// client system times. This offset can be used to syncronize messages
-/// across machines. This will allow better data association and task 
-/// scheduling.
+/// This is used by a host and client to share clock measurments based 
+/// on message passing events. The algorithm uses these events to estimate
+/// an offset between the host and client system times. This offset can
+/// be used to syncronize messages across machines. This will allow better
+/// data association and task scheduling.
 pub struct TimeStamp {
     client_read: u32,
     client_write: u32,
@@ -64,28 +109,15 @@ impl TimeStamp {
         }
     }
 
-    /// Calculates the PTP offset
-    /// 
-    /// most accurate when calculated on host read event.
-    /// 
-    /// Assumes events go: host write (t1) -> client read (t2) -> client write (t3) -> host read (t4)
-    /// 
-    /// C(t) = H(t) + o(t)
-    ///
-    /// This equation can be rearranged to calculate more accurately at different events
-    /// 
-    /// o(t) + d = (t2 - t1), -o(t) + d = (t4 - t3)
-    /// 
-    /// 2 * o = (t2 - t1) - (t4 + t3) - d + d
-    /// 
-    /// o(t) = (t2 + t3 - t1 - t4) / 2
-    /// 
+    /// Calculate the PTP offset with the full time of each system
     pub fn offset(&self) -> f32 {
-        (self.client_read as f32 
-            + self.client_write as f32
-            - self.host_read as f32
-            - self.host_write as f32
-        ) / 2.0
+
+        ptp_offset(self.host_write as f32, 
+            self.client_read as f32, 
+            self.client_write as f32, 
+            self.host_read as f32
+        )
+    
     }
 
     /// Write the microsecond event times to a report
@@ -145,6 +177,7 @@ impl TimeStamp {
         self.client_read = timestamp;
 
         (self.host_read, self.host_write) = self.read_host_stamp(buffer);
+
     }
 
     /// update the host write time and stamp a buffer
@@ -177,43 +210,24 @@ impl Index<usize> for TimeStamp {
     }
 }
 
-/// Lightweight timer object that
-/// can run 2^64 hours + 2^32 microseconds,
-/// Thats like... a long time.
+/// Lightweight timer object that runs for an hour,
+/// than resets.
 pub struct Duration {
-    hours: u64,
-    microseconds: u32, 
+    microseconds: u32,
 }
 
 impl Duration {
-    /// create a ['Duration'] with the given hours and microseconds
-    pub fn new(hours: u64, microseconds: u32) -> Duration {
-        Duration {
-            hours,
-            microseconds,
-        }
-    }
 
-    /// create a ['Duration'] with 0 hours and 0 microseconds
-    pub fn default() -> Duration {
-        Duration::new(0, 0)
+    pub fn new(micros: u32) -> Duration {
+        Duration {
+            microseconds: micros
+        }
     }
 
     /// add microseconds to the timer and handle overflow
     pub fn add_micros(&mut self, micros: u32) -> u32 {
 
-        self.microseconds += micros as u32;
-
-        while self.microseconds >= USEC_PER_HOUR {
-
-            self.microseconds -= USEC_PER_HOUR;
-            self.hours += 1;
-
-            if self.hours == u64::MAX {
-                self.hours = 0;
-            }
-        
-        }
+        self.microseconds = (self.microseconds + micros) % (USEC_PER_SEC * SEC_PER_HOUR as u32);
 
         self.microseconds
     }
@@ -226,16 +240,16 @@ impl Duration {
     }
 
     /// read the microseconds field as milliseconds
-    pub fn millis(&mut self) -> u32 {
+    pub fn millis(&self) -> u32 {
 
         self.microseconds / 1_000
 
     }
 
     /// read the timer value in seconds as a floating point
-    pub fn time(&mut self) -> f32 {
+    pub fn time(&self) -> f32 {
 
-        (self.hours * SEC_PER_HOUR) as f32 + (self.microseconds as f32 / USEC_PER_SEC as f32)
+        self.microseconds as f32 / USEC_PER_SEC as f32
     
     }
 }

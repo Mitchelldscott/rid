@@ -12,19 +12,18 @@
  ********************************************************************************/
 //!
 //!
-//!
-//! # Building
-//!
-//!
-//! # Examples
-//!
-//!
-//! # Configuration
-//!
-//!
+//! # Demonstrate and verify PTP implementation
+//! The validation criteria for the [TimeStamp]
+//! and [Duration] shows that the layer can
+//! accurately convert from one time to the other.
+//! This conversion must hold for offseting a current time:
+//! C = H + o, as well as converting to a future time: C(t) = m * H(t) + b.
+//! In this scenario there is not a constant offset between system times,
+//! This means the calculated offset is invalid after the instant it is calculated.
 
 #![allow(unused_imports)]
 #![allow(unused_macros)]
+
 extern crate hidapi;
 use hidapi::{HidApi, HidDevice};
 
@@ -55,7 +54,7 @@ use rid::{
 
 #[allow(dead_code)]
 const VERBOSITY: usize = 1;
-pub static TEST_DURATION: f32 = 3600.0;
+pub static TEST_DURATION: f32 = 10.0;
 
 pub mod ptp_performance {
 
@@ -85,122 +84,63 @@ pub mod ptp_performance {
         println!("[HID-Control]: Live");
 
         let mut local_offset = vec![];
-
+        
         let mut packet_flight_time = vec![];
-
-        let mut host_offset_error: Vec<f32> = vec![];
-        let mut client_offset_error: Vec<f32> = vec![];
 
         let mut host_truth: Vec<f32> = vec![];
         let mut client_truth: Vec<f32> = vec![];
 
         let mut client_prediction: Vec<f32> = vec![];
 
-        let mut m = 1.0;
-        let mut b = 0.0;
-
-        let mut cr_min = f32::MAX;
-        let mut cr_max = 0.0;
-        let mut hr_min = f32::MAX;
-        let mut hr_max = 0.0;
+        let mut host_ptp_error: Vec<f32> = vec![];
+        let mut client_ptp_error: Vec<f32> = vec![];
 
         let mut write_count = 0.0;
 
-        let mut t = Instant::now();
-
-        println!("\n[PTP-DEMO]\tC(t) = {m} * H(t) + {b}");
-        println!("Host (s)\t\tClient (s)\t\tConversion Error <offset, pred> (us)");
-
-        while layer.system_time.time() < TEST_DURATION
+        while layer.host_elapsed(layer.ptp_stamp[2] as f32) / 1_000_000.0 < TEST_DURATION
         {
 
-            let mut buffer = [0; RID_PACKET_SIZE];
-            buffer[RID_MODE_INDEX] = 255;
-            buffer[RID_TOGL_INDEX] = 255;
+            let flight_time = layer.spin();
+            
+            if flight_time > 0.0 && layer.host_elapsed(layer.ptp_stamp[2] as f32) > 1_000.0 {
 
+                if write_count as u32 % (100 * TEST_DURATION as u32) == 0 {
 
-            write_count += 1.0;
-            layer.write(&mut buffer, t.elapsed().as_micros() as u32);
-
-            match layer.read(&mut buffer, t.elapsed().as_micros() as u32) {
-
-                RID_PACKET_SIZE => {
-
-                    if layer.system_time.micros() > 1_000 {
-
-                        let offset = layer.ptp_stamp.offset(); // calculates the current offset
-
-                        let cr = layer.ptp_stamp[0] as f32;
-                        let cw = layer.ptp_stamp[1] as f32;
-                        let hr = layer.ptp_stamp[2] as f32;
-                        let hw_new = layer.ptp_stamp[3] as f32;
-                        let (_, hw) = layer.ptp_stamp.read_host_stamp(&buffer);
-
-                        packet_flight_time.push(hr - hw as f32);
-
-                        let cr_s = layer.ptp_stamp[0] as f32;
-                        let hr_s = layer.ptp_stamp[2] as f32;
-
-                        if cr_s < cr_min { 
-                            cr_min = cr_s;
-                        }
-
-                        if cr_s > cr_max {
-                            cr_max = cr_s;
-                        }
-                        
-                        if hr_s < hr_min { 
-                            hr_min = hr_s;
-                        }
-
-                        if hr_s > hr_max {
-                            hr_max = hr_s;
-                        }
-
-                        if write_count as u32 % (100 * TEST_DURATION as u32) == 0 {
-                            println!("\n[PTP-DEMO]\tC(t) = {m} * H(t) + {b}");
-                            println!("Host (s)\t\tClient (s)\t\tConversion Error <offset, pred> (us)");
-                        }
-
-                        if write_count as u32 % TEST_DURATION as u32 == 0 {
-
-                            m = (cr_max - cr_min) / (hr_max - hr_min);
-                            b = cr_max - ((cr_max - cr_min) / (hr_max - hr_min) * hr_max);
-
-                            let host_measure = hr;
-                            let cl_offset = cw - offset;
-
-                            let client_measure = cr;
-                            let ho_offset = hw_new + offset;
-                            
-                            local_offset.push(offset / 1_000_000.0);
-
-                            host_truth.push(host_measure);
-                            client_truth.push(client_measure / 1_000_000.0);
-
-                            host_offset_error.push(client_measure - ho_offset);
-                            client_offset_error.push(host_measure - cl_offset);
-
-                            client_prediction.push(((m * TEST_DURATION * 1_000_000.0) + b) / 1_000_000.0); // predict client time at 10s local time
-
-                            println!("  {:.4}\t\t{:.4}\t\t{:.0}\t{:.0}", 
-                                host_measure / 1_000_000.0,
-                                client_measure / 1_000_000.0,
-                                client_measure - ho_offset,
-                                client_measure - ((m * host_measure) + b),
-                            );
-                        }
-                    }
+                    layer.print_header();
+                
                 }
-                _ => {}
+
+                if write_count as u32 % TEST_DURATION as u32 == 0 {
+                    
+                    local_offset.push(layer.ptp_stamp.offset());
+
+                    let host_read = layer.ptp_stamp[2] as f32;
+                    let host_write = layer.ptp_stamp[3] as f32;
+                    let client_read = layer.ptp_stamp[0] as f32;
+                    let client_write = layer.ptp_stamp[1] as f32;
+
+                    let (ho_err, cl_err) = layer.print();
+
+                    host_truth.push(host_read);
+                    client_truth.push(client_read);
+
+                    host_ptp_error.push(ho_err);
+                    client_ptp_error.push(cl_err);
+
+                    client_prediction.push(layer.linear_to_client(TEST_DURATION * 1_000_000.0) / 1_000_000.0);
+
+                    packet_flight_time.push(flight_time);
+                }
+
             }
 
-            layer.timestep(t);
-            t = Instant::now();
+            write_count += 1.0;
+
+            layer.timestep();
 
         }
 
-        println!("[HID-Control]: shutdown");
+        println!("[HID-Control]: shutdown {}", layer.host_elapsed(layer.ptp_stamp[2] as f32));
 
         let ptp_mean =
             local_offset.iter().sum::<f32>() / local_offset.len() as f32;
@@ -210,19 +150,19 @@ pub mod ptp_performance {
             .sum::<f32>()
             / local_offset.len() as f32)
             .sqrt();
-        
-        let host_prediction = host_truth.iter().map(|&x| ((m * x) + b) / 1_000_000.0).collect::<Vec<f32>>();
+
+        let host_prediction = host_truth.iter().map(|&x| layer.linear_to_client(x) / 1_000_000.0).collect::<Vec<f32>>();
         let host_scaled = host_truth.iter().map(|&x| x / 1_000_000.0).collect::<Vec<f32>>();
 
         println!(
             "PTP Offset stats: \n\tSamples: {}\n\t(mean, std): ({ptp_mean:.3}, {ptp_std:.3}) s\n\tHOST elapsed time: {} s [{}, {}]\n\tMCU elapsed time: {} s [{}, {}]",
             local_offset.len(),
-            (hr_max - hr_min) / 1_000_000.0,
-            hr_min / 1_000_000.0,
-            hr_max / 1_000_000.0,
-            (cr_max - cr_min) / 1_000_000.0,
-            cr_min / 1_000_000.0,
-            cr_max / 1_000_000.0,
+            layer.host_elapsed(layer.ptp_stamp[2] as f32) / 1_000_000.0,
+            layer.host_start / 1_000_000.0,
+            layer.ptp_stamp[2] as f32 / 1_000_000.0,
+            layer.client_elapsed() / 1_000_000.0,
+            layer.client_start / 1_000_000.0,
+            layer.ptp_stamp[1] as f32 / 1_000_000.0,
         );
 
         
@@ -240,7 +180,7 @@ pub mod ptp_performance {
             .lines(
                 &x,
                 &local_offset,
-                &[Caption("PTP Offset (us)"), Color("black")],
+                &[Caption("PTP Offset (microseconds)"), Color("black")],
             )
             .lines(
                 &x,
@@ -261,13 +201,13 @@ pub mod ptp_performance {
         fg1.axes2d()
             .lines(
                 &x,
-                &(host_offset_error),
-                &[Caption("host conversion error usec (client time -> host time)"), Color("red")],
+                &(host_ptp_error),
+                &[Caption("Cr(t) - Hw(t) + o(t) (microseconds)"), Color("red")],
             )
             .lines(
                 &x,
-                &(client_offset_error),
-                &[Caption("client conversion error usec"), Color("blue")],
+                &(client_ptp_error),
+                &[Caption("Hw(t) - Cr(t) - o(t)"), Color("blue")],
             );
         
 
@@ -276,24 +216,24 @@ pub mod ptp_performance {
             .lines(
                 &x,
                 &packet_flight_time,
-                &[Caption("packet flight time (us)"), Color("black")],
+                &[Caption("flight time (microseconds)"), Color("black")],
             );
 
         fg3.axes2d()
             .lines(
                 &host_scaled,
                 &host_prediction,
-                &[Caption("host prediction"), Color("red")],
+                &[Caption("C(t) = m * H(t) + b"), Color("red")],
             )
             .lines(
                 &host_scaled,
-                &client_truth,
-                &[Caption("client measured"), Color("blue")],
+                &client_truth.iter().map(|x| x / 1_000_000.0).collect::<Vec<f32>>(),
+                &[Caption("C(t) (seconds)"), Color("blue")],
             )
             .lines(
                 &host_scaled,
                 &client_prediction,
-                &[Caption("client 10s prediction"), Color("green")],
+                &[Caption("C = (m * duration) + b"), Color("green")],
             );
 
         
@@ -311,9 +251,9 @@ pub mod ptp_performance {
 
         assert_le!(0.9, write_count / (TEST_DURATION as f64 / RID_CYCLE_TIME_S), "Insufficient writes to client");
         assert_le!(ptp_std, TEST_DURATION / 200.0, "PTP offset STD was too large");
-        assert_le!(cr_min, cr_max, "MCU Min and Max time is invalid");
-        assert_le!(0.98, ((cr_max - cr_min) / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on MCU");
-        assert_le!(0.98, ((hr_max - hr_min) / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on HOST");
+        assert_le!(0.0, layer.client_elapsed(), "MCU elapsed time is invalid");
+        assert_le!(0.98, (layer.client_elapsed() / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on MCU");
+        assert_le!(0.98, (layer.host_elapsed(layer.ptp_stamp[2] as f32) / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on HOST");
     }
 
     #[test]

@@ -18,9 +18,14 @@ use hidapi::{HidApi, HidDevice};
 use std::time::Instant;
 
 use crate::{
-    RIDReport, RID_PACKET_SIZE, RID_CYCLE_TIME_US,
-    ptp::{Duration, TimeStamp}
+    RIDReport, 
+    RID_PACKET_SIZE, RID_CYCLE_TIME_US,
+    RID_MODE_INDEX, RID_TOGL_INDEX,
+    ptp::{Duration, TimeStamp, USEC_PER_SEC, SEC_PER_HOUR}
 };
+
+/// Microsecond to Hour constant: microseconds = hours * USEC_PER_HOUR
+pub const USEC_PER_HOUR: f32 = USEC_PER_SEC as f32 * SEC_PER_HOUR as f32;
 
 /// helper function to create a new HidDevice
 /// not really relevant since monothread
@@ -42,6 +47,21 @@ pub struct RIDLayer {
     pub vid: u16,
     /// USB device pid
     pub pid: u16,
+
+    // The number of hours that have elapsed on the host
+    pub host_hours: f32,
+    // The time the host started at
+    pub host_start: f32,
+    // The number of hours that have elapsed on the client
+    pub client_hours: f32,
+    // The time the client started at
+    pub client_start: f32,
+
+    // The linear offset coefficients
+    pub linear_offset: [f32; 2],
+
+    // [Instant] to track change in time
+    pub timer: Instant,
 
     /// USB hidapi (C wrapper lib)
     pub hidapi: HidApi,
@@ -66,12 +86,33 @@ impl RIDLayer {
         let mut hidapi = HidApi::new().expect("Failed to create API instance");
         let device = new_device(vid, pid, &mut hidapi);
 
-        let system_time = Duration::default();
+        let system_time = Duration::new(0);
         let ptp_stamp = TimeStamp::new(0, 0, 0, 0);
+
+        let timer = Instant::now();
+
+        let host_hours = 0.0;
+        let host_start = 0.0;
+
+        let client_hours = 0.0;
+        let client_start = 0.0;
+
+        let linear_offset = [0.0, 0.0];
+
 
         RIDLayer {
             vid,
             pid,
+
+            host_hours,
+            host_start,
+
+            client_hours,
+            client_start,
+
+            linear_offset,
+
+            timer,
 
             hidapi,
             device,
@@ -83,12 +124,13 @@ impl RIDLayer {
     }
 
     /// try reading a Report into a buffer
-    pub fn read(&mut self, buffer: &mut RIDReport, micros: u32) -> usize {
+    pub fn read(&mut self, buffer: &mut RIDReport) -> usize {
         
         match self.device.read(buffer) {
             Ok(val) => {
 
-                self.ptp_stamp.host_read(buffer, self.system_time.micros() + micros);
+                self.ptp_stamp.host_read(buffer, self.system_time.micros());
+                self.timer = Instant::now();
                 
                 val
 
@@ -105,9 +147,10 @@ impl RIDLayer {
     }
 
     /// try writing a Report from a buffer
-    pub fn write(&mut self, buffer: &mut RIDReport, micros: u32) {
+    pub fn write(&mut self, buffer: &mut RIDReport) {
         
-        self.ptp_stamp.host_stamp(buffer, self.system_time.micros() + micros);
+        self.ptp_stamp.host_stamp(buffer, self.system_time.micros());
+        self.timer = Instant::now();
 
         match self.device.write(buffer) {
             Ok(RID_PACKET_SIZE) => {},
@@ -116,20 +159,139 @@ impl RIDLayer {
 
     }
 
+    pub fn host_elapsed(&self, host_time: f32) -> f32 {
+
+        host_time + (self.host_hours * USEC_PER_HOUR) - self.host_start
+
+    }
+
+    pub fn client_elapsed(&self) -> f32 {
+
+        self.ptp_stamp[1] as f32 + (self.client_hours * USEC_PER_HOUR) - self.client_start
+
+    }
+
+    pub fn ptp_to_client(&self, t: f32) -> f32 {
+
+        t + self.ptp_stamp.offset() + ((self.client_hours - self.host_hours) * USEC_PER_HOUR)
+
+    }
+
+    pub fn linear_to_client(&self, t: f32) -> f32 {
+        
+
+        (self.linear_offset[0] * t) + self.linear_offset[1]
+
+    }
+
+    pub fn ptp_to_host(&self, t: f32) -> f32 {
+
+        t - self.ptp_stamp.offset() - ((self.client_hours - self.host_hours) * USEC_PER_HOUR)
+
+    }
+
+    pub fn linear_to_host(&self, t: f32) -> f32 {
+        
+
+        (t - self.linear_offset[1]) / self.linear_offset[0]
+
+    }
+
     /// Delay helper, makes loops readable
-    pub fn delay(&self, time: Instant) -> u32 {
-        let mut t = time.elapsed().as_micros();
+    pub fn delay(&self) -> u32 {
+
+        let mut t = self.timer.elapsed().as_micros();
 
         while t < RID_CYCLE_TIME_US as u128 {
-            t = time.elapsed().as_micros();
+
+            t = self.timer.elapsed().as_micros();
+        
         }
         
         t as u32
+
     }
 
     /// another delay helper, makes loops real nice
-    pub fn timestep(&mut self, t: Instant) -> u32 {
-        self.system_time.add_micros(self.delay(t))
+    pub fn timestep(&mut self) -> u32 {
+
+        self.system_time.add_micros(self.delay())
+    
+    }
+
+
+    /// Write, try to read and update the ptp stamp and system time
+    pub fn spin(&mut self) -> f32 {
+
+        let mut buffer = [0; RID_PACKET_SIZE];
+        buffer[RID_MODE_INDEX] = 255;
+        buffer[RID_TOGL_INDEX] = 255;
+
+        self.write(&mut buffer);
+
+        let prev_host_read = self.ptp_stamp[2];
+        let prev_client_read = self.ptp_stamp[0];
+
+        match self.read(&mut buffer) {
+
+            RID_PACKET_SIZE => {
+
+                if self.client_start == 0.0 {
+
+                    self.client_start = self.ptp_stamp[1] as f32;
+                
+                }
+
+                // Handles hour counts wrapping
+                if self.ptp_stamp[3] < prev_host_read {
+
+                    self.host_hours += 1.0;
+
+                }
+
+                if self.ptp_stamp[1] < prev_client_read {
+
+                    self.client_hours += 1.0;
+                
+                }
+
+                // Updates the linear offset coefficients
+                self.linear_offset[0] = self.client_elapsed() / self.host_elapsed(self.ptp_stamp[2] as f32);
+                self.linear_offset[1] = self.ptp_stamp[1] as f32 - (self.linear_offset[0] * (self.ptp_stamp[3] as f32));
+
+                let (_, hw) = self.ptp_stamp.read_host_stamp(&buffer);
+
+                self.ptp_stamp[2] as f32 - hw as f32
+
+            }
+            _ => 0.0,
+        }
+
+    }
+
+    pub fn print_header(&self) {
+        println!("\n[PTP-DEMO]\tC(t) = {:.3} * H(t) + {:.3}", self.linear_offset[0], self.linear_offset[1]);
+        println!("Host (s)\t\tClient (s)\t\tConversion Error <host, client> (us)");
+    }
+
+    pub fn print(&self) -> (f32, f32) {
+
+        let host_read = self.ptp_stamp[2] as f32;
+        let host_write = self.ptp_stamp[3] as f32;
+        let client_read = self.ptp_stamp[0] as f32;
+        let client_write = self.ptp_stamp[1] as f32;
+
+        let host_err = host_write - self.ptp_to_host(client_write);
+        let client_err = client_read - self.ptp_to_client(host_read);
+
+        println!("  {:.4}\t\t{:.4}\t\t{:.0}\t{:.0}", 
+            host_read / 1_000_000.0,
+            client_write / 1_000_000.0,
+            host_err,
+            client_err,
+        );
+
+        (host_err, client_err)
     }
 }
 
