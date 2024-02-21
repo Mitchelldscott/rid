@@ -54,7 +54,7 @@ use rid::{
 
 #[allow(dead_code)]
 const VERBOSITY: usize = 1;
-pub static TEST_DURATION: f32 = 10.0;
+pub static TEST_DURATION: f32 = 3600.0;
 
 pub mod ptp_performance {
 

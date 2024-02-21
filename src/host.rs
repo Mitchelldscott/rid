@@ -245,7 +245,6 @@ impl RIDLayer {
 
         self.write(&mut buffer);
 
-        let prev_host_read = self.ptp_stamp[2];
         let prev_client_read = self.ptp_stamp[0];
 
         match self.read(&mut buffer) {
@@ -292,7 +291,7 @@ impl RIDLayer {
     pub fn print(&self) -> (f32, f32) {
 
         let host_time = self.system_time.micros() as f32 + (self.host_hours * USEC_PER_HOUR);
-        let client_time = self.ptp_stamp[1] as f32;
+        let client_time = self.ptp_stamp[1] as f32 + (self.client_hours * USEC_PER_HOUR);
 
         let host_err = host_time - self.ptp_to_host(client_time);
         let client_err = client_time - self.ptp_to_client(host_time);
