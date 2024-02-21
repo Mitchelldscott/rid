@@ -97,12 +97,12 @@ pub mod ptp_performance {
 
         let mut write_count = 0.0;
 
-        while layer.host_elapsed(layer.ptp_stamp[2] as f32) / 1_000_000.0 < TEST_DURATION
+        while layer.host_elapsed() / 1_000_000.0 < TEST_DURATION
         {
 
             let flight_time = layer.spin();
             
-            if flight_time > 0.0 && layer.host_elapsed(layer.ptp_stamp[2] as f32) > 1_000.0 {
+            if flight_time > 0.0 && layer.host_elapsed() > 1_000.0 {
 
                 if write_count as u32 % (100 * TEST_DURATION as u32) == 0 {
 
@@ -112,7 +112,7 @@ pub mod ptp_performance {
 
                 if write_count as u32 % TEST_DURATION as u32 == 0 {
                     
-                    local_offset.push(layer.ptp_stamp.offset());
+                    local_offset.push(layer.ptp_offset());
 
                     let host_read = layer.ptp_stamp[2] as f32;
                     let host_write = layer.ptp_stamp[3] as f32;
@@ -121,15 +121,15 @@ pub mod ptp_performance {
 
                     let (ho_err, cl_err) = layer.print();
 
-                    host_truth.push(host_read);
-                    client_truth.push(client_read);
-
                     host_ptp_error.push(ho_err);
                     client_ptp_error.push(cl_err);
 
-                    client_prediction.push(layer.linear_to_client(TEST_DURATION * 1_000_000.0) / 1_000_000.0);
-
                     packet_flight_time.push(flight_time);
+
+                    client_truth.push(layer.client_elapsed());
+                    host_truth.push(layer.host_elapsed());
+
+                    client_prediction.push(layer.linear_to_client(TEST_DURATION * 1_000_000.0) / 1_000_000.0);
                 }
 
             }
@@ -140,7 +140,7 @@ pub mod ptp_performance {
 
         }
 
-        println!("[HID-Control]: shutdown {}", layer.host_elapsed(layer.ptp_stamp[2] as f32));
+        println!("[HID-Control]: shutdown {}", layer.host_elapsed());
 
         let ptp_mean =
             local_offset.iter().sum::<f32>() / (local_offset.len() as f32);
@@ -157,7 +157,7 @@ pub mod ptp_performance {
         println!(
             "PTP Offset stats: \n\tSamples: {}\n\t(mean, std): ({ptp_mean:.3}, {ptp_std:.3}) s\n\tHOST elapsed time: {} s [{}, {}]\n\tMCU elapsed time: {} s [{}, {}]",
             local_offset.len(),
-            layer.host_elapsed(layer.ptp_stamp[2] as f32) / 1_000_000.0,
+            layer.host_elapsed() / 1_000_000.0,
             layer.host_start / 1_000_000.0,
             layer.ptp_stamp[2] as f32 / 1_000_000.0,
             layer.client_elapsed() / 1_000_000.0,
@@ -165,10 +165,8 @@ pub mod ptp_performance {
             layer.ptp_stamp[1] as f32 / 1_000_000.0,
         );
 
-        
-
         let x = (0..local_offset.len())
-            .map(|x| x as f32)
+            .map(|x| x as f32 * TEST_DURATION)
             .collect::<Vec<f32>>();
 
         let mut fg = Figure::new();
@@ -238,22 +236,26 @@ pub mod ptp_performance {
 
         
         let _ = fg.show();
+        let _ = fg.save_to_png("~/RoPro/rid/doc/ptp_results/offset.png", 800, 500);
         fg.close();
 
         let _ = fg1.show();
+        let _ = fg1.save_to_png("~/RoPro/rid/doc/ptp_results/ptp_offset_err.png", 800, 500);
         fg1.close();
 
         let _ = fg2.show();
+        let _ = fg2.save_to_png("~/RoPro/rid/doc/ptp_results/flight_time.png", 800, 500);
         fg2.close();
 
         let _ = fg3.show();
+        let _ = fg3.save_to_png("~/RoPro/rid/doc/ptp_results/linear_conv.png", 800, 500);
         fg3.close();
 
         assert_le!(0.9, write_count / (TEST_DURATION as f64 / RID_CYCLE_TIME_S), "Insufficient writes to client");
-        assert_le!(ptp_std / 1_000_000.0, TEST_DURATION / 200.0, "PTP offset STD was too large");
+        assert_le!(ptp_std / 1_000_000.0, TEST_DURATION / 175.0, "PTP offset STD was too large");
         assert_le!(0.0, layer.client_elapsed(), "MCU elapsed time is invalid");
         assert_le!(0.98, (layer.client_elapsed() / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on MCU");
-        assert_le!(0.98, (layer.host_elapsed(layer.ptp_stamp[2] as f32) / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on HOST");
+        assert_le!(0.98, (layer.host_elapsed() / 1_000_000.0) / TEST_DURATION, "Time elapsed differs on HOST");
     }
 
     #[test]

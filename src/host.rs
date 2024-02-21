@@ -86,13 +86,13 @@ impl RIDLayer {
         let mut hidapi = HidApi::new().expect("Failed to create API instance");
         let device = new_device(vid, pid, &mut hidapi);
 
-        let system_time = Duration::new(0);
+        let system_time = Duration::new(USEC_PER_HOUR as u32 - 5_000_000);
         let ptp_stamp = TimeStamp::new(0, 0, 0, 0);
 
         let timer = Instant::now();
 
         let host_hours = 0.0;
-        let host_start = 0.0;
+        let host_start = system_time.micros() as f32;
 
         let client_hours = 0.0;
         let client_start = 0.0;
@@ -157,9 +157,17 @@ impl RIDLayer {
 
     }
 
-    pub fn host_elapsed(&self, host_time: f32) -> f32 {
+    pub fn ptp_offset(&self) -> f32 {
 
-        host_time + (self.host_hours * USEC_PER_HOUR) - self.host_start
+        self.ptp_stamp.offset() + ((self.client_hours - self.host_hours) * USEC_PER_HOUR)
+    
+    }
+
+    pub fn host_elapsed(&self) -> f32 {
+
+        (self.system_time.micros() + self.timer.elapsed().as_micros() as u32) as f32 
+            + (self.host_hours * USEC_PER_HOUR) 
+            - self.host_start
 
     }
 
@@ -171,27 +179,26 @@ impl RIDLayer {
 
     pub fn ptp_to_client(&self, t: f32) -> f32 {
 
-        t + self.ptp_stamp.offset() + ((self.client_hours - self.host_hours) * USEC_PER_HOUR)
+        t + self.ptp_offset() 
 
     }
 
     pub fn linear_to_client(&self, t: f32) -> f32 {
         
 
-        (self.linear_offset[0] * t) + self.linear_offset[1]
+        (self.linear_offset[0] * (t + self.host_start)) + self.linear_offset[1] - self.client_start
 
     }
 
     pub fn ptp_to_host(&self, t: f32) -> f32 {
 
-        t - self.ptp_stamp.offset() - ((self.client_hours - self.host_hours) * USEC_PER_HOUR)
+        t - self.ptp_offset()
 
     }
 
     pub fn linear_to_host(&self, t: f32) -> f32 {
         
-
-        (t - self.linear_offset[1]) / self.linear_offset[0]
+        ((t - self.linear_offset[1]) / self.linear_offset[0])
 
     }
 
@@ -216,8 +223,16 @@ impl RIDLayer {
     pub fn timestep(&mut self) -> u32 {
 
         let t = self.delay();
+
+
+        if self.system_time.micros() + t > USEC_PER_HOUR as u32 {
+
+            self.host_hours += 1.0;
+        
+        }
+
         self.system_time.add_micros(t)
-    
+
     }
 
 
@@ -248,12 +263,6 @@ impl RIDLayer {
                 else {
 
                     // Handles hour counts wrapping
-                    if self.ptp_stamp[3] < prev_host_read {
-
-                        self.host_hours += 1.0;
-
-                    }
-                    
                     if self.ptp_stamp[1] < prev_client_read {
 
                         self.client_hours += 1.0;
@@ -262,8 +271,8 @@ impl RIDLayer {
                     let (_, hw) = self.ptp_stamp.read_host_stamp(&buffer);
 
                     // Updates the linear offset coefficients
-                    self.linear_offset[0] = self.client_elapsed() / self.host_elapsed(self.ptp_stamp[2] as f32);
-                    self.linear_offset[1] = self.ptp_stamp[1] as f32 - (self.linear_offset[0] * (self.ptp_stamp[3] as f32));
+                    self.linear_offset[0] = self.client_elapsed() / self.host_elapsed();
+                    self.linear_offset[1] = self.client_start - (self.linear_offset[0] * self.host_start);
 
                     return self.ptp_stamp[2] as f32 - hw as f32;
 
@@ -282,17 +291,15 @@ impl RIDLayer {
 
     pub fn print(&self) -> (f32, f32) {
 
-        let host_read = self.ptp_stamp[2] as f32;
-        let host_write = self.ptp_stamp[3] as f32;
-        let client_read = self.ptp_stamp[0] as f32;
-        let client_write = self.ptp_stamp[1] as f32;
+        let host_time = self.system_time.micros() as f32 + (self.host_hours * USEC_PER_HOUR);
+        let client_time = self.ptp_stamp[1] as f32;
 
-        let host_err = host_read - self.ptp_to_host(client_write);
-        let client_err = client_write - self.ptp_to_client(host_read);
+        let host_err = host_time - self.ptp_to_host(client_time);
+        let client_err = client_time - self.ptp_to_client(host_time);
 
         println!("  {:.4}\t\t{:.4}\t\t{:.0}\t{:.0}", 
-            host_read / 1_000_000.0,
-            client_write / 1_000_000.0,
+            self.system_time.micros() as f32  / 1_000_000.0,
+            client_time / 1_000_000.0,
             host_err,
             client_err,
         );
