@@ -48,19 +48,19 @@ pub struct RIDLayer {
     /// USB device pid
     pub pid: u16,
 
-    // The number of hours that have elapsed on the host
+    /// Hours that have elapsed on the host
     pub host_hours: f32,
-    // The time the host started at
+    /// Microseconds the host started at
     pub host_start: f32,
-    // The number of hours that have elapsed on the client
+    /// Hours that have elapsed on the client
     pub client_hours: f32,
-    // The time the client started at
+    /// Microseconds the client started at
     pub client_start: f32,
 
-    // The linear offset coefficients
+    /// The linear offset coefficients
     pub linear_offset: [f32; 2],
 
-    // [Instant] to track change in time
+    /// [Instant] to track change in time
     pub timer: Instant,
 
     /// USB hidapi (C wrapper lib)
@@ -157,12 +157,38 @@ impl RIDLayer {
 
     }
 
+    /// Calculate the current ptp offset including hour offsets.
+    ///
+    /// Uses the [TimeStamp] offset calculation and adds the difference in
+    /// client and host hours.
+    ///
+    /// C(t) = H(t) + o(t) // microseconds
+    ///
+    /// o(t) = (t2 + t3 - t1 - t4) / 2
+    ///
+    /// C'(t) = H'(t) + o'(t) // hours
+    /// 
+    /// o'(t) = (t2' + t3' - t1' - t4') / 2
+    ///
+    /// client hours = t2' = t3' // comms are fast enough this should hold
+    ///
+    /// host hours = t1' = t4'
+    ///
+    /// o'(t) = (client hours - host hours)
+    ///
+    /// C'(t) + C(t) = H(t) + H'(t) + (o(t) + o'(t))
+    ///
+    /// This function returns (o(t) + o'(t)), the total hours and micros offset.
     pub fn ptp_offset(&self) -> f32 {
 
         self.ptp_stamp.offset() + ((self.client_hours - self.host_hours) * USEC_PER_HOUR)
     
     }
 
+    /// Calculate the time that has elapsed on the host.
+    /// This utilizes the [Duration], [Instant] and recorded host_start.
+    ///
+    /// This includes hourly rollovers.
     pub fn host_elapsed(&self) -> f32 {
 
         (self.system_time.micros() + self.timer.elapsed().as_micros() as u32) as f32 
@@ -171,18 +197,41 @@ impl RIDLayer {
 
     }
 
+    /// Calculate the time that has elapsed on the client.
+    /// This utilizes the latest client write time from
+    /// the [TimeStamp] and recorded start time.
+    ///
+    /// This also includes hourly rollovers. 
     pub fn client_elapsed(&self) -> f32 {
 
         self.ptp_stamp[1] as f32 + (self.client_hours * USEC_PER_HOUR) - self.client_start
 
     }
 
+    /// Apply the ptp offset to a host time.
+    /// 
+    /// C'(t) + C(t) = H(t) + H'(t) + (o(t) + o'(t))
+    /// 
+    /// Inputs
+    /// - t: f32, H(t) + H'(t) the full host time
+    ///
+    /// Returns
+    /// - C(t) + C'(t): f32
     pub fn ptp_to_client(&self, t: f32) -> f32 {
 
         t + self.ptp_offset() 
 
     }
 
+    /// Apply the linear offset to a host time.
+    /// 
+    /// C(t) = m * H(t) + b
+    /// 
+    /// Inputs
+    /// - t: f32, H(t) elapsed host time
+    ///
+    /// Returns
+    /// - C(t): f32, elapsed client time
     pub fn linear_to_client(&self, t: f32) -> f32 {
         
 
@@ -190,15 +239,34 @@ impl RIDLayer {
 
     }
 
+    /// Apply the ptp offset to a client time.
+    /// 
+    /// H(t) + H'(t) = C'(t) + C(t) + (o(t) + o'(t))
+    /// 
+    /// Inputs
+    /// - t: f32, C(t) + C'(t) the full client time
+    ///
+    /// Returns
+    /// - H(t) + H'(t): f32 the full host time
     pub fn ptp_to_host(&self, t: f32) -> f32 {
 
         t - self.ptp_offset()
 
     }
 
+    /// Apply the linear offset to a client time.
+    /// 
+    /// H(t) = (C(t) - b) / m
+    /// 
+    /// Inputs
+    /// - t: f32, C(t) elapsed client time
+    ///
+    /// Returns
+    /// - H(t) elapsed host time
+    ///
     pub fn linear_to_host(&self, t: f32) -> f32 {
         
-        ((t - self.linear_offset[1]) / self.linear_offset[0])
+        (t - self.linear_offset[1]) / self.linear_offset[0]
 
     }
 
@@ -283,11 +351,13 @@ impl RIDLayer {
 
     }
 
+    /// Only used in the performance tests
     pub fn print_header(&self) {
         println!("\n[PTP-DEMO]\tC(t) = {:.3} * H(t) + {:.3}", self.linear_offset[0], self.linear_offset[1]);
         println!("Host (s)\t\tClient (s)\t\tConversion Error <host, client> (us)");
     }
 
+    /// Only used in the performance tests, returns estimate errors
     pub fn print(&self) -> (f32, f32) {
 
         let host_time = self.system_time.micros() as f32 + (self.host_hours * USEC_PER_HOUR);

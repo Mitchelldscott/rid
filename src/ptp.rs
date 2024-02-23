@@ -55,13 +55,14 @@ pub const USEC_PER_SEC: u32 = 1_000_000;
 /// ```
 ///
 /// // Done on host, after host read event
-/// let client_read     =  1;    // client read, then wrote
-/// let client_write    =  2;
 ///
-/// let host_read       = 10;    // host read, but has not written
-/// let host_write      =  9;
+/// let client_read     =  1.0;    // client read, then wrote
+/// let client_write    =  2.0;
 ///
-/// let offset = offset(host_write, client_read, client_write, host_read);
+/// let host_read       = 10.0;    // host read, but has not written
+/// let host_write      =  9.0;
+///
+/// let offset = rid::ptp::ptp_offset(host_write, client_read, client_write, host_read);
 ///
 /// assert_eq!(client_read, host_write + offset);
 ///
@@ -69,13 +70,13 @@ pub const USEC_PER_SEC: u32 = 1_000_000;
 ///
 /// ```
 /// // Done on client, after client read event
-/// let client_read     = 3;    // client read, but hasn't written
-/// let client_write    = 2;
+/// let client_read     =  3.0;    // client read, but hasn't written
+/// let client_write    =  2.0;
 ///
-/// let host_read       = 10;   // host read, then wrote
-/// let host_write      = 11;
+/// let host_read       = 10.0;    // host read, then wrote
+/// let host_write      = 11.0;
 ///
-/// let offset = offset(host_write, client_read, client_write, host_read);
+/// let offset = rid::ptp::ptp_offset(host_write, client_read, client_write, host_read);
 ///
 /// assert_eq!(client_write - offset, host_read);
 /// ```
@@ -218,6 +219,7 @@ pub struct Duration {
 
 impl Duration {
 
+    /// Create a new duration
     pub fn new(micros: u32) -> Duration {
         Duration {
             microseconds: micros

@@ -54,7 +54,7 @@ use rid::{
 
 #[allow(dead_code)]
 const VERBOSITY: usize = 1;
-pub static TEST_DURATION: f32 = 3600.0;
+pub static TEST_DURATION: f32 = 10.0;
 
 pub mod ptp_performance {
 
@@ -113,11 +113,6 @@ pub mod ptp_performance {
                 if write_count as u32 % TEST_DURATION as u32 == 0 {
                     
                     local_offset.push(layer.ptp_offset());
-
-                    let host_read = layer.ptp_stamp[2] as f32;
-                    let host_write = layer.ptp_stamp[3] as f32;
-                    let client_read = layer.ptp_stamp[0] as f32;
-                    let client_write = layer.ptp_stamp[1] as f32;
 
                     let (ho_err, cl_err) = layer.print();
 

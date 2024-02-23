@@ -33,17 +33,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
 
-/// Simple type alias for more readability
-/// currently does not have any implementations
-pub type RIDReport = [u8; RID_PACKET_SIZE];
-
-/// HID packet size, tried going bigger and things broke
-pub const RID_PACKET_SIZE: usize = 64;
-
-/// Mode index, 255 = init data, 1 = overwrite data, 13 = kill
-pub const RID_MODE_INDEX: usize = 0;  
-/// Toggle index (alt), init data: (1 = init task, 2 = config task) overwrite data: (latch)
-pub const RID_TOGL_INDEX: usize = 1; 
+/////////////////////////////////////////////////////////////
 
 /// Messaging rate for both host and client in seconds
 pub const RID_CYCLE_TIME_S: f64 = 0.001;
@@ -57,7 +47,34 @@ pub const RID_DEFAULT_VID: u16 = 0x1331;
 /// Defualt Dyse Indstries product id
 pub const RID_DEFAULT_PID: u16 = 0x0001;
 
+/////////////////////////////////////////////////////////////
+
+/// Maximum number of tasks user can spawn
+pub const MAX_TASKS: usize = 32;
+/// Maximum number of bytes in a Tasks output buffer and configuration chunk
+pub const MAX_TASK_DATA_BYTES: usize = 40;
+/// Maximum number of configuration chunks each task can use
+pub const MAX_TASK_CONFIG_CHUNKS: usize = 8;
+
+/// HID packet size, tried going bigger and things broke
+pub const RID_PACKET_SIZE: usize = 64;
+
+/// Mode index, 255 = init data, 1 = overwrite data, 13 = kill
+pub const RID_MODE_INDEX: usize = 0;  
+/// Toggle index (alt), init data: (1 = init task, 2 = config task) overwrite data: (latch)
+pub const RID_TOGL_INDEX: usize = 1; 
+
+/// Simple type alias for more readability
+/// currently does not have any implementations
+pub type RIDReport = [u8; RID_PACKET_SIZE];
+
+/// alias for readability
+pub type TaskBuffer = [u8; MAX_TASK_DATA_BYTES];
+
+/////////////////////////////////////////////////////////////
+
 pub mod ptp;
+pub mod rtnt;
 
 #[cfg(feature = "std")]
 /// std build that uses hidapi, a unix C api wrapper
