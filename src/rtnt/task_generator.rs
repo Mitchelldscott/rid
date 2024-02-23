@@ -18,6 +18,7 @@
 //! or built using the "std" feature.
 //!
 
+
 use crate::{
 	TaskBuffer,
 	MAX_TASK_CONFIG_CHUNKS,
@@ -28,7 +29,7 @@ use crate::{
 	}
 };
 
-
+#[derive(PartialEq, Eq)]
 pub enum TaskDriver {
 	Default,
 	Switch,
@@ -37,8 +38,15 @@ pub enum TaskDriver {
 impl TaskDriver {
 	pub fn new(id: u8) -> TaskDriver {
 		match id {
-			0 => TaskDriver::Switch,
+			1 => TaskDriver::Switch,
 			_ => TaskDriver::Default,			
+		}
+	}
+
+	pub fn as_u8(&self) -> u8 {
+		match self {
+			TaskDriver::Switch => 1,
+			TaskDriver::Default => 0,
 		}
 	}
 }
@@ -54,7 +62,7 @@ pub enum TaskExecutable {
 }
 
 impl TaskExecutable {
-	pub fn generate(driver: TaskDriver) -> TaskExecutable {
+	pub fn generate(driver: &TaskDriver) -> TaskExecutable {
 		match driver {
 			TaskDriver::Default => TaskExecutable::Default(RTDefault::new()),
 			TaskDriver::Switch => TaskExecutable::Switch(RTSwitch::new()),

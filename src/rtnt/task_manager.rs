@@ -1,4 +1,4 @@
-/********************************************************************************
+  /********************************************************************************
  *
  *      ____                     ____          __           __       _
  *     / __ \__  __________     /  _/___  ____/ /_  _______/ /______(_)__  _____
@@ -19,15 +19,16 @@
 //!
 
 use crate::{
-    MAX_TASKS,
-    MAX_TASK_DATA_BYTES,
-    MAX_TASK_CONFIG_CHUNKS,
-    TaskBuffer,
+    MAX_TASKS, MAX_TASK_DATA_BYTES, MAX_TASK_CONFIG_CHUNKS, 
+    RID_PACKET_SIZE, RID_MODE_INDEX, RID_TOGL_INDEX,
+    RTNT_DATA_INDEX, RTNT_HDR_INDEX,
+    RIDReport, TaskBuffer,
     rtnt::task_generator::*,
 };
 
 /// Specifies the state a Task is in
 /// and the action required by the [TaskManager]
+#[derive(PartialEq, Eq)]
 pub enum TaskStatus {
     /// The task is panicing due to a runtime/configuration error
     Panic,
@@ -37,6 +38,26 @@ pub enum TaskStatus {
     Standby,
     /// The task is awaiting configuration chunks
     Configuration,
+}
+
+impl TaskStatus {
+    pub fn new(id: u8) -> TaskStatus {
+        match id {
+            0 => TaskStatus::Active,
+            1 => TaskStatus::Standby,
+            2 => TaskStatus::Configuration,           
+            _ => TaskStatus::Panic,
+        }
+    }
+
+    pub fn as_u8(&self) -> u8 {
+        match self {
+            TaskStatus::Panic => 255,
+            TaskStatus::Active => 0,
+            TaskStatus::Standby => 1,
+            TaskStatus::Configuration => 2,           
+        }
+    }
 }
 
 /// Configuration data-structure for tasks.
@@ -54,25 +75,34 @@ pub struct TaskConfig {
     /// Missing chunks of the configuration data
     missing_chunks: [bool; MAX_TASK_CONFIG_CHUNKS],
     /// The data
-    data: [TaskBuffer; MAX_TASK_CONFIG_CHUNKS],
+    buffer: [TaskBuffer; MAX_TASK_CONFIG_CHUNKS],
 }
 
 
 impl TaskConfig {
     /// Create an empty configuration missing all chunks
-    pub fn new() -> TaskConfig {
+    pub fn default() -> TaskConfig {
         TaskConfig {
             id: u8::MAX,
             total_chunks: 0,
             missing_chunks: [true; MAX_TASK_CONFIG_CHUNKS],
-            data: [[0u8; MAX_TASK_DATA_BYTES]; MAX_TASK_CONFIG_CHUNKS],
+            buffer: [[0u8; MAX_TASK_DATA_BYTES]; MAX_TASK_CONFIG_CHUNKS],
+        }
+    }
+
+    pub fn new(total_chunks: usize, buffer: [TaskBuffer; MAX_TASK_CONFIG_CHUNKS]) -> TaskConfig {
+        TaskConfig {
+            id: 0,
+            total_chunks: 0,
+            missing_chunks: [true; MAX_TASK_CONFIG_CHUNKS],
+            buffer: buffer,
         }
     }
 
     /// reset the chunks
     pub fn reset(&mut self) {
         
-        self.missing_chunks = [true; MAX_TASK_CONFIG_CHUNKS];
+        self.missing_chunks = core::array::from_fn(|i| i < self.total_chunks);
 
     }
 
@@ -80,7 +110,7 @@ impl TaskConfig {
     pub fn new_chunk(&mut self, chunk_num: usize, chunk: &[u8]) {
 
         self.missing_chunks[chunk_num] = false;
-        self.data[chunk_num].copy_from_slice(&chunk[..MAX_TASK_DATA_BYTES]);
+        self.buffer[chunk_num].copy_from_slice(&chunk[..MAX_TASK_DATA_BYTES]);
 
     }
 
@@ -89,23 +119,32 @@ impl TaskConfig {
         
         let mut chunks = 0;
 
-        for i in 0..MAX_TASK_CONFIG_CHUNKS {
-            if !self.missing_chunks[i] {
+        for i in 0..self.total_chunks {
+            if self.missing_chunks[i] {
                 chunks += 1;
             }
         }
 
-        self.total_chunks - chunks
+        chunks
+    }
+
+    pub fn first_missing(&self) -> Option<usize> {
+        for i in 0..self.total_chunks {
+            if self.missing_chunks[i] {
+                return Some(i);
+            }
+        }
+        None
     }
 
     /// Insert a new chunk or reset the current chunks
-    pub fn collect(&mut self, data: &[u8]) -> usize {
+    pub fn collect_chunk(&mut self, data: &[u8]) -> usize {
 
-        let id = data[0];
-        let chunk_num = data[2] as usize;
-        let chunk = &data[3..3+MAX_TASK_DATA_BYTES];
+        let id = data[RTNT_DATA_INDEX];
+        let chunk_num = data[RTNT_DATA_INDEX+2] as usize;
+        let chunk = &data[RTNT_DATA_INDEX+3..MAX_TASK_DATA_BYTES+RTNT_DATA_INDEX+3];
         
-        self.total_chunks = data[1] as usize;
+        self.total_chunks = data[RTNT_DATA_INDEX+1] as usize;
 
         match self.id == id {
             true => {
@@ -125,16 +164,57 @@ impl TaskConfig {
         self.missing_chunks()
     }
 
-    pub fn buffer(&self) -> &[TaskBuffer; MAX_TASK_CONFIG_CHUNKS] {
+    /// Insert a new chunk or reset the current chunks
+    pub fn collect_status(&mut self, buffer: &[u8]) -> usize {
 
-        &self.data
+        self.id = buffer[RTNT_DATA_INDEX];        
+        self.total_chunks = buffer[RTNT_DATA_INDEX+1] as usize;
+
+        for i in 0..self.total_chunks {
+            self.missing_chunks[i] = buffer[RTNT_DATA_INDEX+3+i] != 0;
+        }
+
+        self.missing_chunks()
+    }
+
+    pub fn emit_chunk(&self, buffer: &mut [u8]) {
+
+        match self.first_missing() {
+            Some(chunk_num) => {
+                buffer[RTNT_DATA_INDEX] = self.id;
+                buffer[RTNT_DATA_INDEX+1] = self.total_chunks as u8;
+                buffer[RTNT_DATA_INDEX+2] = chunk_num as u8;
+                buffer[RTNT_DATA_INDEX+3..MAX_TASK_DATA_BYTES+RTNT_DATA_INDEX+3].copy_from_slice(&self.buffer[chunk_num]);
+            }
+            _ => {},
+        }
+
+       
+
+    }
+
+    pub fn emit_status(&self, buffer: &mut [u8]) {
+
+        buffer[RTNT_DATA_INDEX] = self.id;
+        buffer[RTNT_DATA_INDEX+1] = self.total_chunks as u8;
+        buffer[RTNT_DATA_INDEX+2] = u8::MAX;
+
+        for i in 0..self.total_chunks {
+            buffer[RTNT_DATA_INDEX+3+i] = self.missing_chunks[i] as u8;
+        }
+
+    }
+
+
+    pub fn data(&self) -> &[TaskBuffer; MAX_TASK_CONFIG_CHUNKS] {
+
+        &self.buffer
     
     }
 }
 
 /// Node containing an executable, stream, rate, inputs and status
 pub struct TaskNode {
-
     /// Speceifies if the data should be streamed
     pub stream: bool,
 
@@ -147,6 +227,8 @@ pub struct TaskNode {
     pub data: TaskConfig,
     /// Status of the task, enables and disables running the task
     pub status: TaskStatus,
+    /// The driver assigned to this node
+    pub driver: Option<TaskDriver>,
 
     /// Optional Executable, there is always the max number of [TaskNodes]
     /// but not all will have [TaskExecutable]s
@@ -164,45 +246,155 @@ impl TaskNode {
             rate: 250,
             inputs: 0,
 
-            data: TaskConfig::new(),
+            data: TaskConfig::default(),
             status: TaskStatus::Configuration,
+            driver: None,
 
             task: None,
         }
     }
 
-    pub fn init(&mut self, data: &[u8]) {
+    pub fn new(stream: bool, rate: u16, inputs: u32, driver: TaskDriver, data: TaskConfig) -> TaskNode {
+        TaskNode {
 
-        let driver = TaskDriver::new(data[0]);
+            stream: stream,
 
-        self.stream = data[1] > 0;
-        self.rate = u16::from_be_bytes([data[2], data[3]]);
-        self.inputs = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
-        self.data.reset();
-        self.task = Some(TaskExecutable::generate(driver));
-            
-    }
+            rate: rate,
+            inputs: inputs,
 
-    pub fn collect(&mut self, data: &[u8]) -> bool {
-        
-        match self.data.collect(&data[..2+MAX_TASK_DATA_BYTES]) {
-            0 => match &mut self.task {
-                Some(task) => task.configure(self.data.buffer()),
-                _ => false,
-            }
-            _ => false,
+            data: data,
+            status: TaskStatus::Configuration,
+            driver: Some(driver),
+
+            task: None,
         }
     }
 
+    pub fn load_header(&mut self, buffer: &[u8]) -> TaskDriver {
+        
+        self.stream = buffer[RTNT_HDR_INDEX] > 0;
+        self.rate = u16::from_be_bytes([buffer[RTNT_HDR_INDEX+2], buffer[RTNT_HDR_INDEX+3]]);
+        self.inputs = u32::from_be_bytes([buffer[RTNT_HDR_INDEX+4], buffer[RTNT_HDR_INDEX+5], buffer[RTNT_HDR_INDEX+6], buffer[RTNT_HDR_INDEX+7]]);
+
+        TaskDriver::new(buffer[RTNT_HDR_INDEX+1])
+    }
+
+    pub fn dump_header(&mut self, buffer: &mut [u8]) {
+        
+        buffer[RTNT_HDR_INDEX] = self.stream as u8;
+        buffer[RTNT_HDR_INDEX+1] = match &self.driver { Some(driver) => driver.as_u8(), None => 0, };
+        buffer[RTNT_HDR_INDEX+2..RTNT_HDR_INDEX+4].copy_from_slice(&self.rate.to_be_bytes());
+        buffer[RTNT_HDR_INDEX+4..RTNT_HDR_INDEX+8].copy_from_slice(&self.inputs.to_be_bytes());
+
+    }
+
+    pub fn init(&mut self, buffer: &[u8]) {
+
+        let new_driver = self.load_header(buffer);
+
+        match &mut self.driver {
+            Some(driver) => {
+                
+                if *driver != new_driver {
+
+                    self.data.reset();
+                    *driver = new_driver;
+                    self.task = None;
+
+                }
+            }
+            None => {
+
+                self.data.reset();
+                self.task = Some(TaskExecutable::generate(&new_driver));
+                self.driver = Some(new_driver);
+                
+            },
+        }
+            
+    }
+
+    pub fn collect(&mut self, buffer: &[u8]) {
+
+        let msg_status = TaskStatus::new(buffer[RID_TOGL_INDEX]);
+
+        match msg_status {
+            TaskStatus::Panic => {
+
+                self.data.reset();
+                self.driver = None;
+                self.task = None;
+
+            },
+
+            TaskStatus::Active => {
+
+                if self.status == TaskStatus::Standby {
+                    self.status = TaskStatus::Active;
+                }
+
+            }
+
+            TaskStatus::Standby => {
+
+                self.init(buffer);
+                self.status = TaskStatus::Configuration;
+
+                if self.data.collect_chunk(buffer) == 0 {
+                    match &mut self.task {
+                        Some(task) => {
+                            if task.configure(self.data.data()) {
+                                self.status = TaskStatus::Standby;
+                            }
+                        }
+                        _ => {},
+                    }
+                }
+
+            }
+
+            TaskStatus::Configuration => {
+
+                if self.status != TaskStatus::Configuration {
+
+                    self.data.collect_status(&buffer);
+
+                }
+
+            }
+        }
+    }
+
+
+    pub fn emit(&self, buffer: &mut [u8]) {
+
+        buffer[RID_TOGL_INDEX] = self.status.as_u8();
+
+        match self.status {
+            TaskStatus::Standby => {
+
+                self.data.emit_chunk(buffer);
+
+            }
+
+            TaskStatus::Configuration => {
+
+                self.data.emit_status(buffer);
+
+            }
+            _ => {},
+        }
+
+    }
 }
 
 /// Stores and manages all tasks and their data
 pub struct TaskManager {
 
     /// list of nodes
-    nodes: [TaskNode; MAX_TASKS],
+    pub nodes: [TaskNode; MAX_TASKS],
     /// buffer containing each tasks output data
-    output_buffer: [Option<TaskBuffer>; MAX_TASKS],
+    pub output_buffer: [Option<RIDReport>; MAX_TASKS],
 
 }
 
@@ -210,7 +402,7 @@ pub struct TaskManager {
 impl TaskManager {
 
     /// Create a new [TaskManager] object
-    pub fn new() -> TaskManager {
+    pub fn default() -> TaskManager {
 
         TaskManager {
 
@@ -220,14 +412,34 @@ impl TaskManager {
         }
     }
 
-    pub fn initialize(&mut self, data: &[u8]) {
+    pub fn new(nodes: [TaskNode; MAX_TASKS]) -> TaskManager {
 
-        self.nodes[data[0] as usize].init(&data[1..9]);
+        TaskManager {
 
+            nodes: nodes,
+            output_buffer: [None; MAX_TASKS],
+        
+        }
     }
 
-    pub fn collect(&mut self, data: &[u8]) {
+    pub fn collect(&mut self, buffer: &RIDReport) {
 
+        self.nodes[buffer[RID_MODE_INDEX] as usize].collect(buffer);
+    }
 
+    pub fn spin(&mut self) {
+
+        for i in 0..MAX_TASKS {
+            match self.nodes[i].driver {
+                Some(_) => {
+                    let mut buffer = [0u8; RID_PACKET_SIZE];
+                    buffer[RID_MODE_INDEX] = i as u8;
+                    self.nodes[i].emit(&mut buffer);
+                    self.output_buffer[i] = Some(buffer);
+                }
+                None => self.output_buffer[i] = None,
+            }
+            
+        }
     }
 }

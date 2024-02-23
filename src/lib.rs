@@ -59,10 +59,16 @@ pub const MAX_TASK_CONFIG_CHUNKS: usize = 8;
 /// HID packet size, tried going bigger and things broke
 pub const RID_PACKET_SIZE: usize = 64;
 
-/// Mode index, 255 = init data, 1 = overwrite data, 13 = kill
+/// Mode index, 255 = config data, 0-31 = sw task ids, 32-40 hardware task ids
 pub const RID_MODE_INDEX: usize = 0;  
-/// Toggle index (alt), init data: (1 = init task, 2 = config task) overwrite data: (latch)
+/// Toggle index (alt), config data: 1, overwrite data: (latch) 2-3 (write input or output)
 pub const RID_TOGL_INDEX: usize = 1; 
+/// RTNT Header index
+pub const RTNT_HDR_INDEX: usize = 2; 
+/// RTNT Header length
+pub const RTNT_HDR_LENGTH: usize = 8;
+/// RTNT Data start
+pub const RTNT_DATA_INDEX: usize = RTNT_HDR_INDEX + RTNT_HDR_LENGTH;
 
 /// Simple type alias for more readability
 /// currently does not have any implementations
