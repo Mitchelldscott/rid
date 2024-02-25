@@ -29,18 +29,3 @@ pub trait RTNTask {
     /// Once the configuration chunks have all arrived pass the buffe to this
     fn configure(&mut self, data: &[TaskBuffer]) -> bool;
 }
-
-/// The switch object
-pub struct RTDefault {}
-
-impl RTNTask for RTDefault {
-
-    /// new switch
-    fn new() -> RTDefault { RTDefault {} }
-
-    /// Run the switch
-    fn run(&mut self, _: &[u8], _: &mut [u8]) {  }
-
-    /// Configure the Switch
-    fn configure(&mut self, _: &[TaskBuffer]) -> bool { true }
-}

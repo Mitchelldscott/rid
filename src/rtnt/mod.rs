@@ -17,5 +17,5 @@
 pub mod task_generator;
 pub mod task_manager;
 
-pub mod default;
+pub mod task;
 pub mod switch;

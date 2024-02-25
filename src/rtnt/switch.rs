@@ -20,11 +20,12 @@
 use crate::{
     TaskBuffer,
     rtnt::{
-        default::RTNTask, 
+        task::RTNTask, 
     }
 };
 
 /// The switch object
+#[derive(Debug)]
 pub struct RTSwitch {}
 
 impl RTNTask for RTSwitch {

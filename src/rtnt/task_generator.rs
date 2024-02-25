@@ -23,37 +23,32 @@ use crate::{
 	TaskBuffer,
 	MAX_TASK_CONFIG_CHUNKS,
 	rtnt::{
-		default::RTNTask,
-		default::RTDefault,
+		task::RTNTask,
 		switch::RTSwitch,
 	}
 };
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum TaskDriver {
-	Default,
 	Switch,
 }
 
 impl TaskDriver {
 	pub fn new(id: u8) -> TaskDriver {
 		match id {
-			1 => TaskDriver::Switch,
-			_ => TaskDriver::Default,			
+			_ => TaskDriver::Switch,
 		}
 	}
 
 	pub fn as_u8(&self) -> u8 {
 		match self {
 			TaskDriver::Switch => 1,
-			TaskDriver::Default => 0,
 		}
 	}
 }
 
-
+#[derive(Debug)]
 pub enum TaskExecutable {
-    Default(RTDefault),
     Switch(RTSwitch),
     // Sinusiod,
     // SquareWave,   
@@ -64,14 +59,12 @@ pub enum TaskExecutable {
 impl TaskExecutable {
 	pub fn generate(driver: &TaskDriver) -> TaskExecutable {
 		match driver {
-			TaskDriver::Default => TaskExecutable::Default(RTDefault::new()),
 			TaskDriver::Switch => TaskExecutable::Switch(RTSwitch::new()),
 		}
 	}
 
 	pub fn configure(&mut self, data: &[TaskBuffer; MAX_TASK_CONFIG_CHUNKS]) -> bool {
 		match self {
-			TaskExecutable::Default(task) => task.configure(data),
 			TaskExecutable::Switch(task) => task.configure(data),
 		}
 	}

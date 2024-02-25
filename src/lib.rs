@@ -55,6 +55,10 @@ pub const MAX_TASKS: usize = 32;
 pub const MAX_TASK_DATA_BYTES: usize = 40;
 /// Maximum number of configuration chunks each task can use
 pub const MAX_TASK_CONFIG_CHUNKS: usize = 8;
+/// Maximum number of bytes a task can use in its name
+pub const MAX_TASK_NAME_LENGTH: usize = 12;
+/// Maximum number of bytes a task can use in its name
+pub const MAX_TASK_INPUTS: usize = 4;
 
 /// HID packet size, tried going bigger and things broke
 pub const RID_PACKET_SIZE: usize = 64;
@@ -76,6 +80,9 @@ pub type RIDReport = [u8; RID_PACKET_SIZE];
 
 /// alias for readability
 pub type TaskBuffer = [u8; MAX_TASK_DATA_BYTES];
+
+/// alias for readability
+pub type InputIDBuffer = [u8; MAX_TASK_INPUTS];
 
 /////////////////////////////////////////////////////////////
 
