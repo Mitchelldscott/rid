@@ -89,7 +89,8 @@ pub type InputIDBuffer = [u8; MAX_TASK_INPUTS];
 pub mod ptp;
 pub mod rtnt;
 
-#[cfg(feature = "std")]
 /// std build that uses hidapi, a unix C api wrapper
 /// there are plenty of alternatives for hidapi, should check them out
+/// also includes toml parsing
+#[cfg(feature = "std")]
 pub mod host;

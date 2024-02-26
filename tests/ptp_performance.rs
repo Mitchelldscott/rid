@@ -45,7 +45,7 @@ use gnuplot::{Caption, Color, Figure};
 
 use rid::{
     ptp::*,
-    host::*,
+    host::layer::RIDLayer,
     RID_PACKET_SIZE,
     RID_MODE_INDEX, RID_TOGL_INDEX,
     RID_DEFAULT_VID, RID_DEFAULT_PID,

@@ -12,7 +12,7 @@
  ********************************************************************************/
 //!
 //!
-//! # Real Time Task: Switch
+//! # Real Time Task: Constant value
 //!
 //!   This task provides a block that can switch
 //! its output on and off using a 2nd signal.
@@ -23,27 +23,38 @@ use serde::{Serialize, Deserialize};
 use crate::{
     TaskBuffer,
     MAX_TASK_INPUTS,
-    MAX_TASK_DATA_BYTES,
     rtnt::RTNTask, 
 };
 
 /// The switch object
 #[cfg_attr(feature = "std", derive(Debug, Serialize, Deserialize))]
-pub struct RTSwitch {}
+pub struct RTConstant {
+    value: f32,
+}
 
-impl RTNTask for RTSwitch {
-    fn new() -> RTSwitch { RTSwitch {} }
+impl RTNTask for RTConstant {
+    fn new() -> RTConstant { RTConstant { value: 0.0 } }
 
     fn run(&mut self, input: [&[u8]; MAX_TASK_INPUTS], output: &mut [u8]) { 
         
-        if input[0][0] > 0 {
-
-            output[..MAX_TASK_DATA_BYTES].copy_from_slice(&input[1][..MAX_TASK_DATA_BYTES]);
         
-        }
+        output[0..4].copy_from_slice(&self.value.to_be_bytes());
+
     }
 
-    fn configure(&mut self, _: &[TaskBuffer]) -> bool { true }
+    fn configure(&mut self, buffer: &[TaskBuffer]) -> bool { 
 
-    fn deconfigure(&self, _: &mut [TaskBuffer]) -> usize { 1 }
+        self.value = f32::from_be_bytes([buffer[0][0], buffer[0][1], buffer[0][2], buffer[0][3]]);
+
+        true
+
+    }
+
+    fn deconfigure(&self, buffer: &mut [TaskBuffer]) -> usize { 
+
+        buffer[0][0..4].copy_from_slice(&self.value.to_be_bytes());
+
+        1
+
+    }
 }

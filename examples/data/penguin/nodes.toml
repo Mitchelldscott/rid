@@ -1,0 +1,21 @@
+
+[switch1]
+driver = "switch"
+stream = false
+rate = 100
+inputs = ["switch2"]
+data = {  }
+
+[switch2]
+driver = "switch"
+stream = true
+rate = 100
+inputs = []
+data = {  }
+
+[value1]
+driver = "scalar"
+stream = true
+rate = 100
+inputs = []
+data = { value = 1.0 }
