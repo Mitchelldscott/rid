@@ -18,18 +18,18 @@
 //! or built using the "std" feature.
 //!
 
-use crate::RIDReport;
+use crate::{RIDReport, RID_PACKET_SIZE, RID_PTP_RESERVED_BYTES};
 
 use core::ops::Index;
 
 /// Client read time index, client sets and host reads this
-pub const PTP_CRTS_INDEX: usize = 48;
+pub const PTP_CRTS_INDEX: usize = RID_PACKET_SIZE - RID_PTP_RESERVED_BYTES;
 /// Client write time index, client sets and host reads this
-pub const PTP_CWTS_INDEX: usize = 52;
+pub const PTP_CWTS_INDEX: usize = PTP_CRTS_INDEX + 4;
 /// Host read time index, host sets and client reads this
-pub const PTP_HRTS_INDEX: usize = 56;
+pub const PTP_HRTS_INDEX: usize = PTP_CWTS_INDEX + 4;
 /// Client write time index, host sets and client reads this
-pub const PTP_HWTS_INDEX: usize = 60;
+pub const PTP_HWTS_INDEX: usize = PTP_HRTS_INDEX + 4;
 
 /// Second to Hour constant: seconds = hours * SEC_PER_HOUR
 pub const SEC_PER_HOUR: u64 = 3_600;

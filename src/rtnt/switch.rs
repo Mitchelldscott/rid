@@ -21,29 +21,56 @@
 use serde::{Serialize, Deserialize};
 
 use crate::{
-    TaskBuffer,
-    MAX_TASK_INPUTS,
-    MAX_TASK_DATA_BYTES,
-    rtnt::RTNTask, 
+    rtnt::*, 
 };
 
 /// The switch object
 #[cfg_attr(feature = "std", derive(Debug, Serialize, Deserialize))]
-pub struct RTSwitch {}
+pub struct RTSwitch {
+    n_outputs: u8,
+}
 
 impl RTNTask for RTSwitch {
-    fn new() -> RTSwitch { RTSwitch {} }
+    fn default() -> RTSwitch { RTSwitch { n_outputs: 1 } }
 
-    fn run(&mut self, input: [&[u8]; MAX_TASK_INPUTS], output: &mut [u8]) { 
-        
-        if input[0][0] > 0 {
+    fn size(&self) -> usize {
 
-            output[..MAX_TASK_DATA_BYTES].copy_from_slice(&input[1][..MAX_TASK_DATA_BYTES]);
-        
-        }
+        self.n_outputs as usize
+    
     }
 
-    fn configure(&mut self, _: &[TaskBuffer]) -> bool { true }
+    fn run(&mut self, input: &[f32]) -> TaskData { 
 
-    fn deconfigure(&self, _: &mut [TaskBuffer]) -> usize { 1 }
+        let mut output = [0.0f32; MAX_TASK_DATA_FLOATS];
+        
+        if input[0] > 0.0 {
+
+            for i in 0..self.n_outputs as usize {
+                output[i] = input[i+1];
+            }
+        
+        }
+
+        output
+    }
+
+
+
+    fn configure(&mut self, data: &[TaskBuffer]) -> bool { 
+
+        self.n_outputs = data[0][0];
+
+        (self.n_outputs as usize) < MAX_TASK_DATA_FLOATS - 1
+
+    }
+
+    fn deconfigure(&self, data: &mut [TaskBuffer]) -> usize { 
+
+        data[0][0] = self.n_outputs;
+        1
+    }
 }
+
+
+
+

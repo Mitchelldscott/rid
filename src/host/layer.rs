@@ -10,6 +10,10 @@
  *
  *
  ********************************************************************************/
+//!
+//!
+//! # HidApi wrapper for RID comms
+
 
 extern crate hidapi;
 use hidapi::{HidApi, HidDevice};
@@ -20,7 +24,7 @@ use std::time::Instant;
 use crate::{
     RIDReport, 
     RID_PACKET_SIZE, RID_CYCLE_TIME_US,
-    RID_MODE_INDEX, RID_TOGL_INDEX,
+    RID_TASK_INDEX, RID_MODE_INDEX,
     ptp::{Duration, TimeStamp, USEC_PER_SEC, SEC_PER_HOUR}
 };
 
@@ -308,8 +312,8 @@ impl RIDLayer {
     pub fn spin(&mut self) -> f32 {
 
         let mut buffer = [0; RID_PACKET_SIZE];
+        buffer[RID_TASK_INDEX] = 255;
         buffer[RID_MODE_INDEX] = 255;
-        buffer[RID_TOGL_INDEX] = 255;
 
         self.write(&mut buffer);
 

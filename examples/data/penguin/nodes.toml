@@ -3,19 +3,22 @@
 driver = "switch"
 stream = false
 rate = 100
-inputs = ["switch2"]
-data = {  }
+n_outputs = 1
+inputs = ["switch2.0", "value1.0"]
+data = { n_outputs = 1 }
 
 [switch2]
 driver = "switch"
 stream = true
 rate = 100
+n_outputs = 1
 inputs = []
-data = {  }
+data = { n_outputs = 1 }
 
 [value1]
 driver = "scalar"
 stream = true
 rate = 100
+n_outputs = 1
 inputs = []
 data = { value = 1.0 }

@@ -21,9 +21,7 @@
 use serde::{Serialize, Deserialize};
 
 use crate::{
-    TaskBuffer,
-    MAX_TASK_INPUTS,
-    rtnt::RTNTask, 
+    rtnt::*, 
 };
 
 /// The switch object
@@ -32,13 +30,26 @@ pub struct RTConstant {
     value: f32,
 }
 
-impl RTNTask for RTConstant {
-    fn new() -> RTConstant { RTConstant { value: 0.0 } }
+impl RTConstant {
+    /// Create a non-default Constant task
+    pub fn new(value: f32) -> RTConstant { RTConstant { value } }
+}
 
-    fn run(&mut self, input: [&[u8]; MAX_TASK_INPUTS], output: &mut [u8]) { 
+impl RTNTask for RTConstant {
+    fn default() -> RTConstant { RTConstant { value: 0.0 } }
+
+    fn size(&self) -> usize {
+
+        1
+    
+    }
+
+    fn run(&mut self, _: &[f32]) -> TaskData { 
         
-        
-        output[0..4].copy_from_slice(&self.value.to_be_bytes());
+        let mut output = [0.0f32; MAX_TASK_DATA_FLOATS];
+        output[0] = self.value;
+
+        output
 
     }
 

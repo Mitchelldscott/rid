@@ -1,0 +1,33 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Calculates the PTP offset"><title>ptp_offset in rid::ptp - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="rid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13) (Homebrew)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc fn"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="logo-container" href="../../rid/index.html"><img class="rust-logo" src="../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a></nav><nav class="sidebar"><a class="logo-container" href="../../rid/index.html"><img class="rust-logo" src="../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a><div class="sidebar-elems"><h2><a href="index.html">In rid::ptp</a></h2></div></nav><main><div class="width-limiter"><nav class="sub"><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="main-heading"><h1>Function <a href="../index.html">rid</a>::<wbr><a href="index.html">ptp</a>::<wbr><a class="fn" href="#">ptp_offset</a><button id="copy-path" title="Copy item path to clipboard"><img src="../../static.files/clipboard-7571035ce49a181d.svg" width="19" height="18" alt="Copy item path"></button></h1><span class="out-of-band"><a class="src" href="../../src/rid/ptp.rs.html#84-86">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><pre class="rust item-decl"><code>pub fn ptp_offset(t1: <a class="primitive" href="https://doc.rust-lang.org/1.74.0/core/primitive.f32.html">f32</a>, t2: <a class="primitive" href="https://doc.rust-lang.org/1.74.0/core/primitive.f32.html">f32</a>, t3: <a class="primitive" href="https://doc.rust-lang.org/1.74.0/core/primitive.f32.html">f32</a>, t4: <a class="primitive" href="https://doc.rust-lang.org/1.74.0/core/primitive.f32.html">f32</a>) -&gt; <a class="primitive" href="https://doc.rust-lang.org/1.74.0/core/primitive.f32.html">f32</a></code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="calculates-the-ptp-offset"><a href="#calculates-the-ptp-offset">Calculates the PTP offset</a></h2>
+<p>Assumes events go: host write (t1) -&gt; client read (t2) -&gt; client write (t3) -&gt; host read (t4)</p>
+<p>C(t) = H(t) + o(t)</p>
+<p>This equation can be rearranged to calculate more accurately at different events</p>
+<p>o(t) + d = (t2 - t1), -o(t) + d = (t4 - t3)</p>
+<p>2 * o = (t2 - t1) - (t4 + t3) - d + d</p>
+<p>o(t) = (t2 + t3 - t1 - t4) / 2</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code>
+<span class="comment">// Done on host, after host read event
+
+</span><span class="kw">let </span>client_read     =  <span class="number">1.0</span>;    <span class="comment">// client read, then wrote
+</span><span class="kw">let </span>client_write    =  <span class="number">2.0</span>;
+
+<span class="kw">let </span>host_read       = <span class="number">10.0</span>;    <span class="comment">// host read, but has not written
+</span><span class="kw">let </span>host_write      =  <span class="number">9.0</span>;
+
+<span class="kw">let </span>offset = rid::ptp::ptp_offset(host_write, client_read, client_write, host_read);
+
+<span class="macro">assert_eq!</span>(client_read, host_write + offset);
+</code></pre></div>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="comment">// Done on client, after client read event
+</span><span class="kw">let </span>client_read     =  <span class="number">3.0</span>;    <span class="comment">// client read, but hasn&#39;t written
+</span><span class="kw">let </span>client_write    =  <span class="number">2.0</span>;
+
+<span class="kw">let </span>host_read       = <span class="number">10.0</span>;    <span class="comment">// host read, then wrote
+</span><span class="kw">let </span>host_write      = <span class="number">11.0</span>;
+
+<span class="kw">let </span>offset = rid::ptp::ptp_offset(host_write, client_read, client_write, host_read);
+
+<span class="macro">assert_eq!</span>(client_write - offset, host_read);</code></pre></div>
+</div></details></section></div></main></body></html>

@@ -20,26 +20,26 @@
 
 
 use crate::{
-	TaskBuffer,
-	MAX_TASK_INPUTS,
-	MAX_TASK_DATA_BYTES,
-	MAX_TASK_CONFIG_CHUNKS,
 	rtnt::{
-		RTNTask,
-		switch::RTSwitch,
+		*,
+		switch::RTSwitch, 
 		constant::RTConstant,
-		task_manager::TaskConfig,
 	}
 };
 
+/// Variants that specify which
+/// [TaskExecutable] to initialize.
 #[derive(PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Debug))]
 pub enum TaskDriver {
+	/// A simple switch with two inputs and one output (TaskBuffer)
 	Switch,
+	/// A constant value, no inputs, one output (f32)
 	Constant,
 }
 
 impl TaskDriver {
+	/// Create Self from a u8
 	pub fn new(id: u8) -> TaskDriver {
 		match id {
 			1 => TaskDriver::Switch,
@@ -47,6 +47,7 @@ impl TaskDriver {
 		}
 	}
 
+	/// Convert to a u8
 	pub fn as_u8(&self) -> u8 {
 		match self {
 			TaskDriver::Switch => 1,
@@ -54,6 +55,7 @@ impl TaskDriver {
 		}
 	}
 
+	/// Converts a string to Self
 	#[cfg(feature = "std")]
 	pub fn from_string(s: &str) -> TaskDriver {
 		match s {
@@ -63,6 +65,7 @@ impl TaskDriver {
 		}
 	}
 
+	/// Converts to a string
 	#[cfg(feature = "std")]
 	pub fn to_string(&self) -> String {
 		match self {
@@ -72,9 +75,13 @@ impl TaskDriver {
 	}
 }
 
+/// Wrapper object to make task types similar
+/// enough to have and array of the type.
 #[cfg_attr(feature = "std", derive(Debug))]
 pub enum TaskExecutable {
+	/// Simple switch
     Switch(RTSwitch),
+    /// Simple constant value
     Constant(RTConstant),
     // Sinusiod,
     // SquareWave,
@@ -84,6 +91,7 @@ pub enum TaskExecutable {
 
 impl TaskExecutable {
 
+	/// Load a [TaskExecutable] from a toml string
 	#[cfg(feature = "std")]
 	pub fn load(driver: TaskDriver, data: &str) -> TaskExecutable {
 
@@ -93,20 +101,31 @@ impl TaskExecutable {
 		}
 	}
 
+	/// Generate a [TaskExecutable] from a driver
 	pub fn generate(driver: &TaskDriver) -> TaskExecutable {
 		match driver {
-			TaskDriver::Switch => TaskExecutable::Switch(RTSwitch::new()),
-			TaskDriver::Constant => TaskExecutable::Constant(RTConstant::new()),
+			TaskDriver::Switch => TaskExecutable::Switch(RTSwitch::default()),
+			TaskDriver::Constant => TaskExecutable::Constant(RTConstant::default()),
 		}
 	}
 
-	pub fn run(&mut self, input: [&[u8]; MAX_TASK_INPUTS], output: &mut [u8]) {
+	/// Get the number of outputs
+	pub fn size(&self) -> usize {
 		match self {
-			TaskExecutable::Switch(task) => task.run(input, output),
-			TaskExecutable::Constant(task) => task.run(input, output),
+			TaskExecutable::Switch(task) => task.size(),
+			TaskExecutable::Constant(task) => task.size(),
 		}
 	}
 
+	/// Call the task and return the output
+	pub fn run(&mut self, input: &[f32]) -> TaskData {
+		match self {
+			TaskExecutable::Switch(task) => task.run(input),
+			TaskExecutable::Constant(task) => task.run(input),
+		}
+	}
+
+	/// Try to configure the tasks private data
 	pub fn configure(&mut self, data: &[TaskBuffer; MAX_TASK_CONFIG_CHUNKS]) -> bool {
 		match self {
 			TaskExecutable::Switch(task) => task.configure(data),
@@ -114,6 +133,7 @@ impl TaskExecutable {
 		}
 	}
 
+	/// Convert a tasks private data into a [TaskConfig] that can be shared through the [TaskDataCache].
 	pub fn deconfigure(&self) -> TaskConfig {
 		let mut buffer = [[0u8; MAX_TASK_DATA_BYTES]; MAX_TASK_CONFIG_CHUNKS];
 

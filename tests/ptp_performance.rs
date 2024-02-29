@@ -47,7 +47,7 @@ use rid::{
     ptp::*,
     host::layer::RIDLayer,
     RID_PACKET_SIZE,
-    RID_MODE_INDEX, RID_TOGL_INDEX,
+    RID_TASK_INDEX, RID_MODE_INDEX,
     RID_DEFAULT_VID, RID_DEFAULT_PID,
     RID_CYCLE_TIME_S, RID_CYCLE_TIME_US,
 };

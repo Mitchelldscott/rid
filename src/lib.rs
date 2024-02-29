@@ -49,40 +49,20 @@ pub const RID_DEFAULT_PID: u16 = 0x0001;
 
 /////////////////////////////////////////////////////////////
 
-/// Maximum number of tasks user can spawn
-pub const MAX_TASKS: usize = 32;
-/// Maximum number of bytes in a Tasks output buffer and configuration chunk
-pub const MAX_TASK_DATA_BYTES: usize = 40;
-/// Maximum number of configuration chunks each task can use
-pub const MAX_TASK_CONFIG_CHUNKS: usize = 8;
-/// Maximum number of bytes a task can use in its name
-pub const MAX_TASK_NAME_LENGTH: usize = 12;
-/// Maximum number of bytes a task can use in its name
-pub const MAX_TASK_INPUTS: usize = 4;
-
-/// HID packet size, tried going bigger and things broke
-pub const RID_PACKET_SIZE: usize = 64;
-
-/// Mode index, 255 = config data, 0-31 = sw task ids, 32-40 hardware task ids
-pub const RID_MODE_INDEX: usize = 0;  
-/// Toggle index (alt), config data: 1, overwrite data: (latch) 2-3 (write input or output)
-pub const RID_TOGL_INDEX: usize = 1; 
-/// RTNT Header index
-pub const RTNT_HDR_INDEX: usize = 2; 
-/// RTNT Header length
-pub const RTNT_HDR_LENGTH: usize = 8;
-/// RTNT Data start
-pub const RTNT_DATA_INDEX: usize = RTNT_HDR_INDEX + RTNT_HDR_LENGTH;
-
 /// Simple type alias for more readability
 /// currently does not have any implementations
 pub type RIDReport = [u8; RID_PACKET_SIZE];
 
-/// alias for readability
-pub type TaskBuffer = [u8; MAX_TASK_DATA_BYTES];
+/// HID packet size, tried going bigger and things broke
+pub const RID_PACKET_SIZE: usize = 64;
 
-/// alias for readability
-pub type InputIDBuffer = [u8; MAX_TASK_INPUTS];
+/// Id of the task this packet is meant for
+pub const RID_TASK_INDEX: usize = 0;  
+/// Mode of the packet
+pub const RID_MODE_INDEX: usize = 1; 
+/// Bytes reserved for PTP
+pub const RID_PTP_RESERVED_BYTES: usize = 16;
+
 
 /////////////////////////////////////////////////////////////
 

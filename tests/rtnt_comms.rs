@@ -21,12 +21,12 @@
 use std::fs::read_to_string;
 
 use rid::{
-    RID_PACKET_SIZE, MAX_TASK_INPUTS, 
-    MAX_TASK_DATA_BYTES, MAX_TASK_CONFIG_CHUNKS, 
-    host::{task_builder::*}, 
+    RID_PACKET_SIZE, 
+    RID_MODE_INDEX, RID_TASK_INDEX,
     rtnt::{
+        *,
         task_generator::{TaskExecutable, TaskDriver}, 
-        task_manager::{TaskStatus, TaskNode, TaskConfig, TaskManager}
+        task_manager::{TaskNode, TaskManager}
     }
 };
 
@@ -34,34 +34,6 @@ pub mod rtnt_comms {
 
     use super::*;
 
-    // pub fn toml_to_tasknode(value: toml::Value::Table) -> TaskNode {
-
-
-    //     let name = v.0;
-    //     let rate = v.1.get("rate").expect("Task {name} is missing a rate");
-    //     let driver = v.1.get("driver").expect("Task {name} is missing a driver");
-
-    //     // let data = v.1.get("data").unwrap_or(vec![]);
-    //     let stream = v.1.get("stream").unwrap_or(false);
-    //     let inputs = v.1.get("inputs").unwrap_or(vec![]);
-
-    //     // data.iter().for_each(|value| {
-    //     //     value.to_be_bytes().iter().for_each(|b| {
-    //     //         if element < 40 {
-    //     //             buffer[chunk][element] = *b;
-    //     //             element += 1;
-    //     //         }
-    //     //         else {
-    //     //             element = 0;
-    //     //             chunk += 1;
-    //     //             assert_le!(chunk, MAX_TASK_CONFIG_CHUNKS, "To many chunks in config file")
-    //     //         }
-    //     //     })
-    //     // });
-
-    //     TaskNode::new(node.stream, node.rate, TaskDriver::new(driver), task_config)
-
-    // }
 
     pub fn load_file(data: &str) -> TaskManager {
 
@@ -75,23 +47,37 @@ pub mod rtnt_comms {
                 value.into_iter().for_each(|v| {
                                         
                     let name = v.0;
-                    let stream = match v.1.get("stream") { Some(toml::Value::Boolean(value)) => *value, _ => false, };
+                    let stream = match v.1.get("stream") { Some(toml::Value::Boolean(value)) => *value as u8, _ => 0, };
                     let rate = match v.1.get("rate") { Some(toml::Value::Integer(value)) => *value as u16, _ => panic!("Task {name} has a bad rate value"), };
+                    let outs = match v.1.get("n_outputs") { Some(toml::Value::Integer(value)) => *value as u8, _ => panic!("Task {name} has a bad number of output values"), };
                     let driver = match v.1.get("driver") { Some(toml::Value::String(value)) => value.as_str(), _ => panic!("Task {name} has a bad driver value"), };
-                    let inputs = match v.1.get("inputs") { 
+                    
+                    let mut inputs = vec![];
+                    match v.1.get("inputs") { 
                         Some(toml::Value::Array(value)) => {
-                            value.into_iter().map(|v| match v {
-                                toml::Value::String(value) => value.clone(),
-                                _ => panic!("Task {name} has bad inputs"),
-                            }).collect()
+                            value.into_iter().for_each(|v| match v {
+                                toml::Value::String(value) => {
+                                    let mut split = value.split('.');
+                                    match split.next() {
+                                        Some(name) => {
+                                            match split.next() {
+                                                Some(index) => inputs.push((name.to_string(), index.parse::<u8>().expect("Failed parsing input {name} index"))),
+                                                None => inputs.push((name.to_string(), 0)),
+                                            }
+                                        }
+                                        None => panic!("Split should never return None... see the crate docs or something"),
+                                    }
+                                },
+                                _ => panic!("Task {name} has bad input values"),
+                            });
                         }, 
-                        _ => vec![], 
+                        _ => {}, 
                     };
 
                     println!("name: {name}\tdriver: {driver}\tinputs: {inputs:?}");
 
-                    let task_exe = TaskExecutable::load(TaskDriver::from_string(driver.clone()), toml::to_string(v.1.get("data").expect("Task is missing data")).expect("Failed to convert task {name}s toml to string").as_str());
-                    let node = TaskNode::new(stream, rate, TaskDriver::from_string(driver), task_exe);
+                    let task_exe = TaskExecutable::load(TaskDriver::from_string(driver), toml::to_string(v.1.get("data").expect("Task is missing data")).expect("Failed to convert task {name}s toml to string").as_str());
+                    let node = TaskNode::new(stream, rate, inputs.len() as u8, outs, TaskDriver::from_string(driver), task_exe);
                     
                     raw_experiment.push((name, inputs, node));
 
@@ -106,20 +92,20 @@ pub mod rtnt_comms {
 
         raw_experiment.sort_by_key(|task| task.1.len()); // This is not actually good, need to do a graph based search ()
 
-        println!("nodes: {names:?}");
+        raw_experiment.into_iter().enumerate().for_each(|(_, (name, inputs, mut task))| {
 
-        raw_experiment.into_iter().enumerate().for_each(|(i, (name, inputs, mut task))| {
-
-            let mut bytes = [0u8; MAX_TASK_INPUTS];
+            let mut bytes = [[0u8; 2]; MAX_TASK_INPUTS];
             
             inputs.iter().enumerate().for_each(|(j, input)| {
-                bytes[j] = match names.iter().position(|name| *name == *input) {
-                    Some(val) => val as u8,
-                    None => panic!("Unable to find input {input} for task {name}"),
+                match names.iter().position(|name| *name == input.0) {
+                    Some(val) => {
+                        bytes[j][0] = val as u8;
+                        bytes[j][1] = input.1;
+                    },
+                    None => panic!("Unable to find input {input:?} for task {name}"),
                 };
             });
 
-            task.status = TaskStatus::Standby;
             task.link(bytes);
             tm.init_node(task);
 
@@ -129,23 +115,20 @@ pub mod rtnt_comms {
 
     }
 
-    #[test]
-    pub fn rtnt_node_dump() {
 
-        let toml_data = "/home/m_dyse/RoPro/rid/examples/data/penguin/nodes.toml";
-
-        let mut tm = TaskManager::default();
-        let mut tm_host = load_file(toml_data);
-
+    pub fn spin_local(n: usize, tm: &mut TaskManager, tm_host: &mut TaskManager) {
         let mut ctr = 0;
 
-        while ctr < 10 {
+        while ctr < n {
 
+            println!("Total Nodes: host {}, client {}", tm_host.n_nodes, tm.n_nodes);
 
-            let host_to_client = match tm_host.spin() {
-                Some(buffer) => buffer,
+            let host_to_client = match tm_host.control_spin() {
+                Some(buffer) => {
+                    // println!("\t[host -> client] node: {} mode: {:?}", buffer[RID_TASK_INDEX] as i8 - 1, PacketType::new(buffer[RID_MODE_INDEX]));
+                    buffer
+                },
                 None => {
-                    println!("Host silent {} {}", tm_host.n_nodes, tm_host.context);
                     [0u8; RID_PACKET_SIZE]
                 },
             };
@@ -154,104 +137,158 @@ pub mod rtnt_comms {
 
 
             let client_to_host = match tm.spin() {
-                Some(buffer) => buffer,
+                Some(buffer) => {
+                    // println!("\t[client -> host] node: {} mode: {:?}", buffer[RID_TASK_INDEX] as i8 - 1, PacketType::new(buffer[RID_MODE_INDEX]));
+                    buffer
+                },
                 None => {
-                    println!("Client silent {} {}", tm.n_nodes, tm.context);
                     [0u8; RID_PACKET_SIZE]
                 },
             };
 
-            match tm_host.collect(&client_to_host) {
-                Some(publish_buffer) => {}, // println!("publish buffer {publish_buffer:?}"),
-                None => {},
-            };
+            if tm_host.collect(&client_to_host) {
+
+
+                let node = client_to_host[RID_TASK_INDEX] - 1;
+                let mut data = [0f32; MAX_TASK_DATA_FLOATS];
+
+                for i in 0..MAX_TASK_DATA_FLOATS {
+                    data[i] = f32::from_be_bytes([client_to_host[RTNT_DATA_INDEX+(4*i)],client_to_host[RTNT_DATA_INDEX+(4*i)+1],client_to_host[RTNT_DATA_INDEX+(4*i)+2],client_to_host[RTNT_DATA_INDEX+(4*i)+3]]);
+                }
+
+                println!("\tData from node[{}] = {:?}", node, (0..tm_host.nodes[node as usize].n_outputs).map(|i| data[i as usize]).collect::<Vec<f32>>());
+
+            }
 
             ctr += 1;
-        }
-
-        assert_eq!(tm_host.n_nodes, tm.n_nodes, "number of nodes did not syncronize");
-        for i in 0..tm_host.n_nodes {
-            assert_eq!(tm_host.nodes[i].data, tm.nodes[i].data, "TaskConfigs {i} did not syncronize");
-        }
-
-        ctr = 0;
-
-        while ctr < 3 {
-
-
-            let host_to_client = match tm_host.panic() {
-                Some(buffer) => buffer,
-                None => {
-                    println!("Host silent {}", tm_host.n_nodes);
-                    [0u8; RID_PACKET_SIZE]
-                },
-            };
-
-            tm.collect(&host_to_client);
-
-
-            let client_to_host = match tm.spin() {
-                Some(buffer) => buffer,
-                None => {
-                    println!("Client silent {}", tm.n_nodes);
-                    [0u8; RID_PACKET_SIZE]
-                },
-            };
-
-            match tm_host.collect(&client_to_host) {
-                Some(publish_buffer) => {}, // println!("publish buffer {publish_buffer:?}"),
-                None => {},
-            };
-
-            ctr += 1;
-        }
-
-        assert_eq!(tm_host.n_nodes, tm.n_nodes, "number of nodes did not syncronize after panic");
-
-        tm_host = load_file(toml_data);
-
-
-        ctr = 0;
-
-        while ctr < 10 {
-
-            let host_to_client = match tm_host.spin() {
-                Some(buffer) => buffer,
-                None => {
-                    println!("Host silent");
-                    [0u8; RID_PACKET_SIZE]
-                },
-            };
-
-            tm.collect(&host_to_client);
-
-            let client_to_host = match tm.spin() {
-                Some(buffer) => buffer,
-                None => {
-                    println!("Client silent");
-                    [0u8; RID_PACKET_SIZE]
-                },
-            };
-
-            match tm_host.collect(&client_to_host) {
-                Some(publish_buffer) => {}, // println!("publish buffer {publish_buffer:?}"),
-                None => {},
-            };
-
-            ctr += 1;
-        }
-
-
-        assert_eq!(tm_host.n_nodes, tm.n_nodes, "number of nodes did not syncronize after reinit");
-
-        for i in 0..tm_host.n_nodes {
-            assert_eq!(tm_host.nodes[i].data, tm.nodes[i].data, "TaskConfigs did not syncronize after reinit");
         }
 
     }
 
-    // #[test]
-    // pub fn rt_task_spawn() {
-    //     let tm = TaskManager::new();
-    // }
+    #[test]
+    pub fn rtnt_load_panic_load_load_panic() {
+
+        let toml_data = "examples/data/penguin/nodes.toml";
+        let toml_data_alt = "examples/data/penguin/nodes_alt.toml";
+
+        let mut tm = TaskManager::default();
+        let mut tm_host = load_file(toml_data);
+
+        println!("===== Load 1 =====");
+        spin_local(10, &mut tm, &mut tm_host);
+
+        assert_eq!(tm_host.n_nodes, tm.n_nodes, "number of nodes did not syncronize");
+        for i in 0..tm_host.n_nodes {
+            assert_eq!(tm_host.nodes[i].status, tm.nodes[i].status, "TaskStatus {i} did not syncronize");
+            assert_eq!(tm_host.nodes[i].config_cache, tm.nodes[i].config_cache, "TaskConfigs {i} did not syncronize");
+            if tm_host.nodes[i].stream > 0 {
+                assert_eq!(tm_host.nodes[i].data, tm.nodes[i].data, "TaskData {i} did not syncronize");
+            }
+        }
+
+        println!("===== Panic 1 =====");
+        tm_host.panic_all();
+        spin_local(1, &mut tm, &mut tm_host);
+
+        assert_eq!(tm_host.n_nodes, tm.n_nodes, "number of nodes did not syncronize after panic");
+        for i in 0..tm_host.n_nodes {
+            assert_eq!(tm_host.nodes[i].status, tm.nodes[i].status, "TaskStatus {i} did not syncronize after panic");
+            assert_eq!(tm_host.nodes[i].config_cache, tm.nodes[i].config_cache, "TaskConfigs {i} did not syncronize after panic");
+            if tm_host.nodes[i].stream > 0 {
+                assert_eq!(tm_host.nodes[i].data, tm.nodes[i].data, "TaskData {i} did not syncronize after panic");
+            }
+        }
+
+        tm_host = load_file(toml_data);
+
+        println!("===== Load 1 =====");
+        spin_local(10, &mut tm, &mut tm_host);
+
+        assert_eq!(tm_host.n_nodes, tm.n_nodes, "number of nodes did not syncronize after first reinit");
+        for i in 0..tm_host.n_nodes {
+            assert_eq!(tm_host.nodes[i].status, tm.nodes[i].status, "TaskStatus {i} did not syncronize after first reinit");
+            assert_eq!(tm_host.nodes[i].config_cache, tm.nodes[i].config_cache, "TaskConfigs {i} did not syncronize after first reinit");
+            if tm_host.nodes[i].stream > 0 {
+                assert_eq!(tm_host.nodes[i].data, tm.nodes[i].data, "TaskData {i} did not syncronize after first reinit");
+            }
+        }
+
+        println!("===== Load 3 =====");
+        tm_host = load_file(toml_data_alt);
+
+        spin_local(10, &mut tm, &mut tm_host);
+
+        assert_eq!(tm_host.n_nodes, tm.n_nodes, "number of nodes did not syncronize after second reinit");
+        for i in 0..tm_host.n_nodes {
+            assert_eq!(tm_host.nodes[i].status, tm.nodes[i].status, "TaskStatus {i} did not syncronize after second reinit");
+            assert_eq!(tm_host.nodes[i].config_cache, tm.nodes[i].config_cache, "TaskConfigs {i} did not syncronize after second reinit");
+            if tm_host.nodes[i].stream > 0 {
+                assert_eq!(tm_host.nodes[i].data, tm.nodes[i].data, "TaskData {i} did not syncronize after second reinit");
+            }
+        }
+
+        println!("===== Panic 2 =====");
+        tm_host.panic_all();
+        spin_local(1, &mut tm, &mut tm_host);
+
+        assert_eq!(tm_host.n_nodes, tm.n_nodes, "number of nodes did not syncronize after second panic");
+        for i in 0..tm_host.n_nodes {
+            assert_eq!(tm_host.nodes[i].status, tm.nodes[i].status, "TaskStatus {i} did not syncronize after second panic");
+            assert_eq!(tm_host.nodes[i].config_cache, tm.nodes[i].config_cache, "TaskConfigs {i} did not syncronize after second panic");
+            if tm_host.nodes[i].stream > 0 {
+                assert_eq!(tm_host.nodes[i].data, tm.nodes[i].data, "TaskData {i} did not syncronize after second panic");
+            }
+        }
+
+    }
+
+    #[test]
+    pub fn rtnt_load_reconfigure() {
+
+        let toml_data_alt = "examples/data/penguin/nodes_alt.toml";
+
+        let mut tm = TaskManager::default();
+        let mut tm_host = load_file(toml_data_alt);
+
+        println!("===== Load 1 =====");
+        spin_local(10, &mut tm, &mut tm_host);
+
+        assert_eq!(tm_host.n_nodes, tm.n_nodes, "number of nodes did not syncronize");
+        for i in 0..tm_host.n_nodes {
+            assert_eq!(tm_host.nodes[i].status, tm.nodes[i].status, "TaskStatus {i} did not syncronize");
+            assert_eq!(tm_host.nodes[i].config_cache, tm.nodes[i].config_cache, "TaskConfigs {i} did not syncronize");
+            if tm_host.nodes[i].stream > 0 {
+                assert_eq!(tm_host.nodes[i].data, tm.nodes[i].data, "TaskData {i} did not syncronize");
+            }
+        }
+
+
+        for i in 0..tm_host.n_nodes {
+            let task = TaskExecutable::Constant(rid::rtnt::constant::RTConstant::new(i as f32));
+            let driver = TaskDriver::Constant;
+            let stream = 1;
+            let rate = 100;
+            let ins = 0;
+            let outs = 1;
+
+            tm_host.nodes[i].modify(stream, rate, ins, outs, driver, task);
+        }
+
+        spin_local(11, &mut tm, &mut tm_host);
+
+        assert_eq!(tm_host.n_nodes, tm.n_nodes, "number of nodes did not syncronize");
+        for i in 0..tm_host.n_nodes {
+            assert_eq!(tm_host.nodes[i].status, tm.nodes[i].status, "TaskStatus {i} did not syncronize");
+            assert_eq!(tm_host.nodes[i].config_cache, tm.nodes[i].config_cache, "TaskConfigs {i} did not syncronize");
+            if tm_host.nodes[i].stream > 0 {
+                assert_eq!(tm_host.nodes[i].data, tm.nodes[i].data, "TaskData {i} did not syncronize");
+            }
+        }
+        
+    }
+
 }
+
+
+
+

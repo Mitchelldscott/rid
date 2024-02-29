@@ -1,0 +1,24 @@
+
+[switch1]
+driver = "switch"
+stream = true
+rate = 100
+n_outputs = 1
+inputs = ["value1", "value2"]
+data = { n_outputs = 1 }
+
+[value1]
+driver = "scalar"
+stream = false
+rate = 100
+n_outputs = 1
+inputs = []
+data = { value = 1.0 }
+
+[value2]
+driver = "scalar"
+stream = false
+rate = 100
+n_outputs = 1
+inputs = []
+data = { value = 1.0 }

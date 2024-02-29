@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PTP_CRTS_INDEX","PTP_CWTS_INDEX","PTP_HRTS_INDEX","PTP_HWTS_INDEX","SEC_PER_HOUR","USEC_PER_SEC"],"fn":["ptp_offset"],"struct":["Duration","TimeStamp"]};
