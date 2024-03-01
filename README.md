@@ -16,15 +16,25 @@ To build and open the docs run
 
 ![RID linear offset conversion](doc/ptp_results/ptp_offset_err.png)
 PTP Offset Error: difference in measured times and estimated times
+ - horizontal: milliseconds
+ - vertical: microseconds
 
 ![RID linear offset conversion](doc/ptp_results/offset.png)
 PTP Offset: offset calculation over time
+ - Used to map current timestamps from host <-> client
+ - horizontal: milliseconds
+ - vertical: microseconds
 
 ![RID linear offset conversion](doc/ptp_results/linear_conv.png)
 Linear offset conversion: C(t) = m * H(t) + b
+ - Used to map durations/future/past times from host <-> client
+ - horizontal: seconds
+ - vertical: seconds
 
 ![RID Packet flight time](doc/ptp_results/flight_time.png)
-Packet flight times: host time (milliseconds) vs flight time (microseconds)
+Packet flight times: host time vs flight time
+ - horizontal: milliseconds
+ - vertical: microseconds
 
 
 # Testing
@@ -58,7 +68,6 @@ By forcing a host to configure some nodes, the same nodes should be initialized 
 Teensy. TaskManagers will output and share the proper RID packets to the remote TaskManager.
 The goal for these tests is to make sure nodes output data, config data and number of nodes
 is constant between the two TaskManagers.
-
 
     cargo test --features="std" rtnt_load_panic_load_load_panic -- --nocapture
 

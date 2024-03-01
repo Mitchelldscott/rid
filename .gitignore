@@ -3,3 +3,4 @@
 debug
 Cargo.lock
 .rust*
+**/.DS_Store
