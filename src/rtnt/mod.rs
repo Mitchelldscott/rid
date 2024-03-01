@@ -287,11 +287,15 @@ impl TaskConfig {
     /// This is only valid when total_chunks
     /// is set to the correct value.
     pub fn first_missing(&self) -> Option<usize> {
+
         for i in 0..self.total_chunks {
+
             if self.missing_chunks[i] {
                 return Some(i);
             }
+            
         }
+
         None
     }
 
